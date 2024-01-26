@@ -1,2 +1,0 @@
-# Nutox
-Private Repository
