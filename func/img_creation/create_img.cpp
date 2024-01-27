@@ -1,5 +1,6 @@
 #include "create_img.h"
 #include "../../utils/progressbar/progressbar.h"
+#include "../../utils/bmp/writer/bmp_writer.h"  // Include the BMP writer header file
 
 void create_img(const string& file_path, const string& save_path) {
     string file_name = filesystem::path(file_path).filename().stem().string();
@@ -23,40 +24,27 @@ void create_img(const string& file_path, const string& save_path) {
         i++;
     }
 
-    int width = ceil(sqrt(binary_str.length()));
-    int height = width;
+    int side = ceil(sqrt(binary_str.length()));
 
-    Mat image(height, width, CV_8UC1);
-    cout << endl;
-    auto start_time = std::chrono::steady_clock::now();
-    for(int i = 0; i < height; i++) {
-        for(int j = 0; j < width; j++) {
-            int index = i * width + j;
+    // Create a 2D vector of bools for the pixel data
+    std::vector<std::vector<bool>> pixels(side, std::vector<bool>(side, false));
+    for(int i = 0; i < side; i++) {
+        for(int j = 0; j < side; j++) {
+            int index = i * side + j;
             if(index < binary_str.length()) {
-                image.at<uchar>(i, j) = binary_str[index] == '1' ? 255 : 0;
+                pixels[i][j] = binary_str[index] == '1' ? true : false;
             }
         }
-        print_progress(float(i) / height, start_time, height, "Image Creation");
+        print_progress(float(i) / side, start_timeB, side, "Image Creation");
     }
-    imwrite(output_image_file, image);
 
-    Py_Initialize();
-    std::string python_code =
-        "from PIL import Image\n"
-        "import os\n"
-        "Image.MAX_IMAGE_PIXELS = None\n"
-        "with Image.open('" + output_image_file + "') as img:\n"
-        "    img = img.convert('1')\n"
-        "    img.save('" + output_image_file + "')\n";
-    PyRun_SimpleString(python_code.c_str());
-
-    Py_Finalize();
-    cout << "\nImage creation complete." << endl;
+    // Write the image to a BMP file
+    writeBMP(output_image_file, pixels);
 
     // Create JSON object
     Json::Value metadata;
     metadata["original_file_name"] = filesystem::path(file_path).filename().string();
-    metadata["binary_length"] = binary_str.length();
+    metadata["binary_length"] = ceil(binary_str.length());
 
     // Write JSON metadata to file
     ofstream metadata_file_stream(metadata_file);
