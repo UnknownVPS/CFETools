@@ -28,6 +28,6 @@ struct BMPInfoHeader {
 };
 #pragma pack(pop)
 
-void writeBMP(const std::string& filename, const std::vector<std::vector<bool>>& pixels);
+void writeBMP(const std::string& filename, const std::string& inputFilename);
 
 #endif  // BMP_WRITER_H

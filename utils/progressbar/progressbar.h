@@ -1,7 +1,22 @@
 #include <iostream>
 #include <chrono>
 #include <string>
+#include <thread>
+#include <atomic>
 
 using namespace std;
 
-void print_progress(float progress, const std::chrono::steady_clock::time_point& start_time, int total_operations, const string& task_name);
+class ProgressBar {
+public:
+    ProgressBar(atomic<float>& progress_var);
+    ~ProgressBar();
+
+private:
+    void run();
+    void print() const;
+
+    atomic<float>& progress;
+    float last_progress;
+    atomic<bool> running;
+    thread progress_thread;
+};

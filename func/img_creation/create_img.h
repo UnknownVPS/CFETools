@@ -10,6 +10,9 @@
 #include <chrono>
 #include <jsoncpp/json/json.h>
 #include <filesystem>
+#include <thread>
+#include <condition_variable>
+#include <atomic>
 
 using namespace std;
 
