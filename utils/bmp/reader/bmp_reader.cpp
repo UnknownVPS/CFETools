@@ -2,7 +2,6 @@
 #include <fstream>
 #include <vector>
 #include <cmath>
-#include </workspaces/Nutox/utils/progressbar/progressbar.h>
 
 class PixelReader {
 public:
@@ -47,28 +46,29 @@ private:
 };
 
 
-void readBMP(const std::string& filename, const std::string& outputFilename) {
+void readBMP(const std::string& filename, const std::string& outputFilename, unsigned long long int binary_length) {
     // Create PixelReader object
     PixelReader reader(filename);
 
-    // Open the output file
-    std::ofstream outputFile(outputFilename);
+    // Open the output file in binary mode
+    std::ofstream outputFile(outputFilename, std::ios::binary);
 
     // Read the pixel data
+    unsigned long long int total_bits_processed = 0;
     for (int y = reader.getHeight() - 1; y >= 0; --y) {
         for (int x = 0; x < reader.getWidth(); ++x) {
             unsigned char byte = reader.getNextByte();
-            if (reader.isEndOfFile()) {
+            if (reader.isEndOfFile() || total_bits_processed >= binary_length) {
                 break;
             }
-            for (int i = 7; i >= 0; --i) {
-                bool pixel = byte & (1 << i);
-                outputFile << (pixel ? '1' : '0');
-            }
+            // Write the byte directly to the output file
+            outputFile.write(reinterpret_cast<const char*>(&byte), sizeof(byte));
+            total_bits_processed += 8;
+        }
+        if (total_bits_processed >= binary_length) {
+            break;
         }
     }
 
-
     outputFile.close();
 }
-

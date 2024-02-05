@@ -3,17 +3,18 @@
 #include <fstream>
 #include <vector>
 #include <cmath>
+#include <bitset>
 
 class PixelGenerator {
 public:
-    PixelGenerator(const std::string& inputFilename) : inputFile(inputFilename) {}
+    PixelGenerator(const std::string& inputFilename) : inputFile(inputFilename, std::ios::binary) {}
 
-    bool getNextPixel() {
+    std::string getNextPixel() {
         char bitChar;
         if (!(inputFile.get(bitChar))) {
-            return false; // End of file reached
+            return ""; // End of file reached
         }
-        return bitChar == '1' ? true : false;
+        return std::bitset<8>(bitChar).to_string();
     }
 
 private:
@@ -28,8 +29,11 @@ public:
     }
 
     PixelWriter& operator<<(PixelGenerator& generator) {
-        bool pixel = generator.getNextPixel();
-        writePixel(pixel);
+        std::string pixelBits = generator.getNextPixel();
+        for (char bit : pixelBits) {
+            bool pixel = bit == '1' ? true : false;
+            writePixel(pixel);
+        }
         return *this;
     }
 
@@ -106,21 +110,19 @@ private:
 
 void writeBMP(const std::string& filename, const std::string& inputFilename) {
     // Calculate the width and height of the image
-    std::ifstream inputFile(inputFilename);
+    std::ifstream inputFile(inputFilename, std::ios::binary);
     inputFile.seekg(0, std::ios::end);
     std::streamsize size = inputFile.tellg();
     inputFile.seekg(0, std::ios::beg);
-    long long int width = std::ceil(std::sqrt(size));
+    long long int width = std::ceil(std::sqrt(size * 8)); // Multiply by 8 because each byte is now 8 bits
     long long int height = width;
-    std::cout << width * height << std::endl;
-    std::cout << width << std::endl;
     inputFile.close();
 
     // Create PixelGenerator and PixelWriter objects
     PixelGenerator generator(inputFilename);
     PixelWriter writer(filename, width, height);
-    // Write the pixel data
 
+    // Write the pixel data
     for (int y = height - 1; y >= 0; --y) {
         for (int x = 0; x < width; ++x) {
             writer << generator;
@@ -128,5 +130,4 @@ void writeBMP(const std::string& filename, const std::string& inputFilename) {
     }
 
     writer.finish();
-
 }
