@@ -1,8 +1,12 @@
 #ifndef BMP_WRITER_H
 #define BMP_WRITER_H
 
-#include <vector>
 #include <string>
+#include <iostream>
+#include <fstream>
+#include <cmath>
+#include <bitset>
+#include <filesystem>
 
 #pragma pack(push, 1)
 struct BMPFileHeader {

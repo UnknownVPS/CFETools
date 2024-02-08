@@ -1,7 +1,4 @@
 #include "bmp_reader.h"
-#include <fstream>
-#include <vector>
-#include <cmath>
 
 class PixelReader {
 public:
@@ -17,11 +14,11 @@ public:
         return byte;
     }
 
-    int getWidth() const {
+    long int getWidth() const {
         return infoHeader.width;
     }
 
-    int getHeight() const {
+    long int getHeight() const {
         return infoHeader.height;
     }
 
@@ -33,20 +30,17 @@ private:
     std::ifstream file;
     BMPFileHeader fileHeader;
     BMPInfoHeader infoHeader;
-    unsigned char byte = 0;
-    int bits = 0;
 
     void readHeaders() {
         file.read(reinterpret_cast<char*>(&fileHeader), sizeof(fileHeader));
         file.read(reinterpret_cast<char*>(&infoHeader), sizeof(infoHeader));
-
         // Skip the color table for 1-bit image
         file.seekg(sizeof(unsigned int) * 2, std::ios::cur);
     }
 };
 
 
-void readBMP(const std::string& filename, const std::string& outputFilename, unsigned long long int binary_length) {
+void readBMP(const std::string& filename, const std::string& outputFilename, unsigned long long int binaryLength) {  
     // Create PixelReader object
     PixelReader reader(filename);
 
@@ -55,17 +49,17 @@ void readBMP(const std::string& filename, const std::string& outputFilename, uns
 
     // Read the pixel data
     unsigned long long int total_bits_processed = 0;
-    for (int y = reader.getHeight() - 1; y >= 0; --y) {
-        for (int x = 0; x < reader.getWidth(); ++x) {
+    for (long int y = reader.getHeight() - 1; y >= 0; --y) {
+        for (long int x = 0; x < reader.getWidth(); ++x) {
             unsigned char byte = reader.getNextByte();
-            if (reader.isEndOfFile() || total_bits_processed >= binary_length) {
+            if (reader.isEndOfFile() || total_bits_processed >= binaryLength) {
                 break;
             }
             // Write the byte directly to the output file
             outputFile.write(reinterpret_cast<const char*>(&byte), sizeof(byte));
             total_bits_processed += 8;
         }
-        if (total_bits_processed >= binary_length) {
+        if (total_bits_processed >= binaryLength) {
             break;
         }
     }

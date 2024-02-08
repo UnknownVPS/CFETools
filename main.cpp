@@ -1,4 +1,3 @@
-#include "utils/progressbar/progressbar.h"
 #include "func/img_creation/create_img.h"
 #include "func/file_creation/create_file.h"
 #include "utils/userinput/user_input.h"
@@ -23,7 +22,7 @@ int main(int argc, char* argv[]) {
             std::cout << "Directory does not exist. Creating now...\n";
             std::filesystem::create_directory(tool_dir);
         }
-        save_path = tool_dir;
+        save_path = tool_dir.string();
     } else {
         std::cout << "Cannot get home directory.\n";
         return 1;

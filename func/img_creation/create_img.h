@@ -1,18 +1,6 @@
 #include <iostream>
-#include <fstream>
-#include <vector>
-#include <cmath>
-#include <bitset>
-#include <deque>
-#include <algorithm>
-#include <iterator>
-#include <thread>
-#include <chrono>
-#include <jsoncpp/json/json.h>
 #include <filesystem>
-#include <thread>
-#include <condition_variable>
-#include <atomic>
+#include <cmath>
 
 using namespace std;
 

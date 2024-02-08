@@ -1,9 +1,4 @@
 #include "bmp_writer.h"
-#include "../../progressbar/progressbar.h"
-#include <fstream>
-#include <vector>
-#include <cmath>
-#include <bitset>
 
 class PixelGenerator {
 public:
@@ -114,8 +109,8 @@ void writeBMP(const std::string& filename, const std::string& inputFilename) {
     inputFile.seekg(0, std::ios::end);
     std::streamsize size = inputFile.tellg();
     inputFile.seekg(0, std::ios::beg);
-    long long int width = std::ceil(std::sqrt(size * 8)); // Multiply by 8 because each byte is now 8 bits
-    long long int height = width;
+    long int width = std::ceil(std::sqrt(size * 8)); // Multiply by 8 because each byte is now 8 bits
+    long int height = width;
     inputFile.close();
 
     // Create PixelGenerator and PixelWriter objects
@@ -123,8 +118,8 @@ void writeBMP(const std::string& filename, const std::string& inputFilename) {
     PixelWriter writer(filename, width, height);
 
     // Write the pixel data
-    for (int y = height - 1; y >= 0; --y) {
-        for (int x = 0; x < width; ++x) {
+    for (long int y = height - 1; y >= 0; --y) {
+        for (long int x = 0; x < width; ++x) {
             writer << generator;
         }
     }
