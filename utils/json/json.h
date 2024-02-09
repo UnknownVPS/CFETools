@@ -3,9 +3,10 @@
 
 #include <fstream>
 #include <string>
+#include <cstdint>
 
 struct Data {
-    unsigned long long int binary_length;
+    uint_fast64_t binary_length;
     std::string original_filename;
 };
 

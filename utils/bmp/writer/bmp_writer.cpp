@@ -19,7 +19,7 @@ private:
 
 class PixelWriter {
 public:
-    PixelWriter(const std::string& filename, int width, int height) : file(filename, std::ios::binary), width(width), height(height) {
+    PixelWriter(const std::string& filename, int_fast32_t width, int_fast32_t height) : file(filename, std::ios::binary), width(width), height(height) {
         writeHeaders();
     }
 
@@ -49,8 +49,8 @@ public:
 
 private:
     std::ofstream file;
-    int width;
-    int height;
+    int_fast32_t width;
+    int_fast32_t height;
     unsigned char byte = 0;
     int bits = 0;
 
@@ -109,8 +109,8 @@ void writeBMP(const std::string& filename, const std::string& inputFilename) {
     inputFile.seekg(0, std::ios::end);
     std::streamsize size = inputFile.tellg();
     inputFile.seekg(0, std::ios::beg);
-    long int width = std::ceil(std::sqrt(size * 8)); // Multiply by 8 because each byte is now 8 bits
-    long int height = width;
+    int_fast32_t width = std::ceil(std::sqrt(size * 8)); // Multiply by 8 because each byte is now 8 bits
+    int_fast32_t height = width;
     inputFile.close();
 
     // Create PixelGenerator and PixelWriter objects
@@ -118,8 +118,8 @@ void writeBMP(const std::string& filename, const std::string& inputFilename) {
     PixelWriter writer(filename, width, height);
 
     // Write the pixel data
-    for (long int y = height - 1; y >= 0; --y) {
-        for (long int x = 0; x < width; ++x) {
+    for (int_fast32_t y = height - 1; y >= 0; --y) {
+        for (int_fast32_t x = 0; x < width; ++x) {
             writer << generator;
         }
     }

@@ -5,3 +5,5 @@ video.bmp
 .vscode
 *.o
 cfx.exe
+video.mtd
+cfx.android

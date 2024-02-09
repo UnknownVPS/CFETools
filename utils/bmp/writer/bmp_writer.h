@@ -7,6 +7,7 @@
 #include <cmath>
 #include <bitset>
 #include <filesystem>
+#include <cstdint>
 
 #pragma pack(push, 1)
 struct BMPFileHeader {

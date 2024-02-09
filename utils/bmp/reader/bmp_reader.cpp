@@ -14,11 +14,11 @@ public:
         return byte;
     }
 
-    long int getWidth() const {
+    int_fast32_t getWidth() const {
         return infoHeader.width;
     }
 
-    long int getHeight() const {
+    int_fast32_t getHeight() const {
         return infoHeader.height;
     }
 
@@ -40,17 +40,17 @@ private:
 };
 
 
-void readBMP(const std::string& filename, const std::string& outputFilename, unsigned long long int binaryLength) {  
+void readBMP(const std::string& filename, const std::string& outputFilename, uint_fast64_t binaryLength) {  
     // Create PixelReader object
     PixelReader reader(filename);
-
+    std::cout << outputFilename << binaryLength << std::endl;
     // Open the output file in binary mode
     std::ofstream outputFile(outputFilename, std::ios::binary);
 
     // Read the pixel data
-    unsigned long long int total_bits_processed = 0;
-    for (long int y = reader.getHeight() - 1; y >= 0; --y) {
-        for (long int x = 0; x < reader.getWidth(); ++x) {
+    uint_fast64_t total_bits_processed = 0;
+    for (int_fast32_t y = reader.getHeight() - 1; y >= 0; --y) {
+        for (int_fast32_t x = 0; x < reader.getWidth(); ++x) {
             unsigned char byte = reader.getNextByte();
             if (reader.isEndOfFile() || total_bits_processed >= binaryLength) {
                 break;

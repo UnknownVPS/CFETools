@@ -1,10 +1,4 @@
-#include <fstream>
-#include <string>
-
-struct Data {
-    unsigned long long int binary_length;
-    std::string original_filename;
-};
+#include "json.h"
 
 void write_json(const std::string& path, const Data& data) {
     std::ofstream file(path);
