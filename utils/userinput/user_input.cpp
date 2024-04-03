@@ -1,8 +1,10 @@
 #include "user_input.h"
+#include "../logger/logger.h"
 
-string get_user_input() {
+string Input::ask(string question) {
     string input;
-    cout << "Please enter a command (img/file): ";
+    cerr << "[QUESTION] " << question;
     getline(cin, input);
+    Logger::Log(LOG_DEBUG, "Input received: " + input);
     return input;
-}
+};
