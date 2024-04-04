@@ -20,11 +20,11 @@ jobs:
         run: echo 1.0.0 > version.txt
 
       - name: Rename executable
-        run: mv cfx cfet-\$(cat version.txt)
+        run: mv cfx cfet-1.0.0
 
       - name: Create release
         id: create_release
-        run: echo "::set-output name=version::$(cat version.txt)"
+        run: echo "::set-output name=version::1.0.0"
         env:
           GITHUB_TOKEN: "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"  # Add your PAT here
         timeout-minutes: 10
