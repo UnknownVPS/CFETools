@@ -17,7 +17,7 @@ jobs:
         run: make  # Replace with your actual build command
 
       - name: Get cfx version
-        run: cfx -v > version.txt
+        run: 1.0.0 > version.txt
 
       - name: Rename executable
         run: mv cfx cfet-\$(cat version.txt)
