@@ -1,0 +1,47 @@
+name: Build and Release
+
+on:
+  push:
+    branches:
+      - main  # Adjust this branch name if needed
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Build with make
+        run: make  # Replace with your actual build command
+
+      - name: Get cfx version
+        run: cfx -v > version.txt
+
+      - name: Rename executable
+        run: mv cfx cfet-\$(cat version.txt)
+
+      - name: Create release
+        id: create_release
+        run: echo "::set-output name=version::$(cat version.txt)"
+        env:
+          GITHUB_TOKEN: "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"  # Add your PAT here
+        timeout-minutes: 10
+
+      - name: Upload cfet and version.txt as release assets
+        id: upload_release_assets
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: "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"
+        with:
+          upload_url: https://uploads.github.com/repos/sastatest/releases/${{ steps.create_release.outputs.id }}/assets
+          asset_path: |
+            ./cfet-${{ steps.create_release.outputs.version }}
+            ./version.txt
+          asset_name: |
+            cfet-${{ steps.create_release.outputs.version }}
+            version.txt
+          asset_content_type: |
+            application/octet-stream
+            text/plain
