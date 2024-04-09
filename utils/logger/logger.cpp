@@ -1,8 +1,7 @@
 #include "logger.h"
 #include <iostream>
 
-LogLevel Logger::currentLevel = LOG_INFO; // Default level
-std::mutex Logger::logMutex;
+LogLevel Logger::currentLevel = LOG_INFO;
 extern bool isDebugMode;
 
 void Logger::SetLevel(LogLevel level) {
@@ -10,7 +9,6 @@ void Logger::SetLevel(LogLevel level) {
 }
 
 void Logger::Log(LogLevel level, const std::string& message) {
-    std::lock_guard<std::mutex> guard(logMutex);
     // Check if the message level is debug and if debug mode is enable
     if (level == LOG_DEBUG && !isDebugMode) {
         return;

@@ -2,7 +2,6 @@
 #define LOGGER_H
 
 #include <string>
-#include <mutex>
 
 enum LogLevel {
     LOG_ERROR,
@@ -18,7 +17,6 @@ public:
 
 private:
     static LogLevel currentLevel;
-    static std::mutex logMutex;
     static std::string LogLevelToString(LogLevel level);
 };
 extern bool isDebugMode;

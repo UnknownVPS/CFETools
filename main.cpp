@@ -2,6 +2,7 @@
 #include "func/img_creation/create_img.h"
 #include "func/file_creation/create_file.h"
 #include "utils/userinput/user_input.h"
+#include "version.h"
 bool isDebugMode = false;
 
 int main(int argc, char* argv[]) {
@@ -12,13 +13,13 @@ int main(int argc, char* argv[]) {
     Logger::SetLevel(LOG_INFO);
     bool file_flag = false;
     bool img_flag = false;
-
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
         if (arg == "--debug") {
             isDebugMode = true;
             Logger::SetLevel(LOG_DEBUG);
             Logger::Log(LOG_DEBUG, "Running in DEBUG mode.");
+            Logger::Log(LOG_DEBUG, "Using version: " VERSION);
         } else if (arg.substr(0, 6) == "--img=") {
             if (file_flag) {
                 Logger::Log(LOG_ERROR, "Both --file and --img options provided.");
@@ -35,8 +36,14 @@ int main(int argc, char* argv[]) {
             file_flag = true;
             file_path = arg.substr(7);
             input = "file";
+        } else if (arg == "--version" || arg == "-v") {
+            Logger::Log(LOG_INFO, "Currently using CFET Version: " VERSION " By UnknownVPS ©");
+            return 0;
+        } else {
+            Logger::Log(LOG_ERROR, "Unrecognised command line input: " + arg);
+            return 102;
         }
-    }
+    } 
     Logger::Log(LOG_DEBUG, "Checking directory status");
     #ifdef _WIN32
         home = std::getenv("USERPROFILE");
