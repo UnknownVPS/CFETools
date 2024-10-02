@@ -8,6 +8,8 @@
 #include <bitset>
 #include <filesystem>
 #include <cstdint>
+#include <random>
+#include <ctime>
 
 #pragma pack(push, 1)
 struct BMPFileHeader {

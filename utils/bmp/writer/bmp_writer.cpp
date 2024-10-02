@@ -1,7 +1,6 @@
 #include "bmp_writer.h"
 #include "../../logger/logger.h"
-#include <random>
-#include <ctime>
+
 class PixelGenerator {
 public:
     PixelGenerator(const std::string& inputFilename, const std::string& key) 

@@ -1,5 +1,5 @@
 #include "bmp_reader.h"
-#include <random>
+
 class PixelReader {
 public:
     PixelReader(const std::string& filename, const std::string& key) 

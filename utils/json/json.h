@@ -8,6 +8,7 @@
 struct Data {
     uint_fast64_t binary_length;
     std::string original_filename;
+    std::string encryption_key;
 };
 
 void write_json(const std::string& path, const Data& data);
