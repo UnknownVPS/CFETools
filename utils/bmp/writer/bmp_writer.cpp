@@ -1,25 +1,41 @@
 #include "bmp_writer.h"
-
+#include "../../logger/logger.h"
+#include <random>
+#include <ctime>
 class PixelGenerator {
 public:
-    PixelGenerator(const std::string& inputFilename) : inputFile(inputFilename, std::ios::binary) {}
+    PixelGenerator(const std::string& inputFilename, const std::string& key) 
+        : inputFile(inputFilename, std::ios::binary), key(key), keyIndex(0) {
+        std::seed_seq seed(key.begin(), key.end());
+        rng.seed(seed);
+    }
 
     std::string getNextPixel() {
         char bitChar;
         if (!(inputFile.get(bitChar))) {
             return ""; // End of file reached
         }
+        bitChar = encryptByte(bitChar);
         return std::bitset<8>(bitChar).to_string();
     }
 
 private:
     std::ifstream inputFile;
-};
+    std::string key;
+    size_t keyIndex;
+    std::mt19937 rng;
 
+    char encryptByte(char byte) {
+        char keyByte = key[keyIndex];
+        keyIndex = (keyIndex + 1) % key.length();
+        return byte ^ keyByte ^ static_cast<char>(rng() & 0xFF);
+    }
+};
 
 class PixelWriter {
 public:
-    PixelWriter(const std::string& filename, int_fast32_t width, int_fast32_t height) : file(filename, std::ios::binary), width(width), height(height) {
+    PixelWriter(const std::string& filename, int_fast32_t width, int_fast32_t height, const std::string& key) 
+        : file(filename, std::ios::binary), width(width), height(height), key(key) {
         writeHeaders();
     }
 
@@ -53,6 +69,7 @@ private:
     int_fast32_t height;
     unsigned char byte = 0;
     int bits = 0;
+    std::string key;
 
     void writeHeaders() {
         BMPFileHeader fileHeader;
@@ -103,8 +120,9 @@ private:
     }
 };
 
-void writeBMP(const std::string& filename, const std::string& inputFilename) {
+void writeBMP(const std::string& filename, const std::string& inputFilename, const std::string& encryptionKey) {
     // Calculate the width and height of the image
+    Logger::Log(LOG_DEBUG, "Initializing image writer..");
     std::ifstream inputFile(inputFilename, std::ios::binary);
     inputFile.seekg(0, std::ios::end);
     std::streamsize size = inputFile.tellg();
@@ -114,8 +132,9 @@ void writeBMP(const std::string& filename, const std::string& inputFilename) {
     inputFile.close();
 
     // Create PixelGenerator and PixelWriter objects
-    PixelGenerator generator(inputFilename);
-    PixelWriter writer(filename, width, height);
+    Logger::Log(LOG_DEBUG, "Encoding and writing file...");
+    PixelGenerator generator(inputFilename, encryptionKey);
+    PixelWriter writer(filename, width, height, encryptionKey);
 
     // Write the pixel data
     for (int_fast32_t y = height - 1; y >= 0; --y) {

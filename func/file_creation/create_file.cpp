@@ -7,7 +7,8 @@ void create_file(const std::string& bmp_file_path, const std::string& save_path)
     uint_fast64_t binary_length = data.binary_length;
     std::string original_filename = data.original_filename;
     std::cout << original_filename << binary_length << std::endl;
-    readBMP(bmp_file_path, save_path + "/" + original_filename, binary_length);
+    std::string encryptionKey = "YourSecretKeyHere";
+    readBMP(bmp_file_path, save_path + "/" + original_filename, binary_length, encryptionKey);
 
     std::cout << "\nOriginal file reconstructed successfully." << std::endl;
 }

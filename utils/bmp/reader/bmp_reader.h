@@ -6,5 +6,5 @@
 #include <cmath>
 #include <cstdint>
 
-void readBMP(const std::string& filename, const std::string& outputFilename, uint_fast64_t binary_length);
+void readBMP(const std::string& filename, const std::string& outputFilename, uint_fast64_t binaryLength, const std::string& encryptionKey);
 #endif  // BMP_READER_H

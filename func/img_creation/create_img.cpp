@@ -15,6 +15,7 @@ void create_img(const std::string& file_path, const std::string& save_path) {
     Logger::Log(LOG_DEBUG, "Writing JSON file.");
     write_json(save_path + '/' + file_name + ".mtd", data);
     // Call the writeBMP function
-    writeBMP(save_path + "/" + file_name + ".bmp", file_path);
-    std::cout << "Image written successfully" << std::endl;
+    std::string encryptionKey = "YourSecretKeyHere";
+    writeBMP(save_path + "/" + file_name + ".bmp", file_path, encryptionKey);
+    Logger::Log(LOG_INFO, "Image writen successfully!");
 }
