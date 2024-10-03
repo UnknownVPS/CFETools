@@ -1,4 +1,7 @@
 #include "bmp_reader.h"
+#include <vector>
+#include <thread>
+#include <algorithm>
 
 class PixelReader {
 public:
@@ -7,14 +10,18 @@ public:
         readHeaders();
         std::seed_seq seed(key.begin(), key.end());
         rng.seed(seed);
+        bufferSize = std::min(static_cast<size_t>(1024 * 1024), static_cast<size_t>(infoHeader.width) * infoHeader.height);
+        buffer.resize(bufferSize);
+        readBuffer();
     }
 
     unsigned char getNextByte() {
-        unsigned char byte;
-        if (!file.read(reinterpret_cast<char*>(&byte), sizeof(byte))) {
-            return 0; // End of file reached
+        if (bufferPos >= bytesRead) {
+            if (!readBuffer()) {
+                return 0; // End of file reached
+            }
         }
-        return decryptByte(byte);
+        return decryptByte(buffer[bufferPos++]);
     }
 
     int_fast32_t getWidth() const {
@@ -26,7 +33,7 @@ public:
     }
 
     bool isEndOfFile() const {
-        return file.eof();
+        return file.eof() && bufferPos >= bytesRead;
     }
 
 private:
@@ -36,12 +43,23 @@ private:
     std::string key;
     size_t keyIndex;
     std::mt19937 rng;
+    std::vector<unsigned char> buffer;
+    size_t bufferSize;
+    size_t bufferPos = 0;
+    size_t bytesRead = 0;
 
     void readHeaders() {
         file.read(reinterpret_cast<char*>(&fileHeader), sizeof(fileHeader));
         file.read(reinterpret_cast<char*>(&infoHeader), sizeof(infoHeader));
         // Skip the color table for 1-bit image
         file.seekg(sizeof(unsigned int) * 2, std::ios::cur);
+    }
+
+    bool readBuffer() {
+        file.read(reinterpret_cast<char*>(buffer.data()), bufferSize);
+        bytesRead = file.gcount();
+        bufferPos = 0;
+        return bytesRead > 0;
     }
 
     unsigned char decryptByte(unsigned char byte) {
@@ -52,28 +70,33 @@ private:
 };
 
 void readBMP(const std::string& filename, const std::string& outputFilename, uint_fast64_t binaryLength, const std::string& encryptionKey) {  
-    // Create PixelReader object with encryption key
     PixelReader reader(filename, encryptionKey);
     std::cout << "Output file: " << outputFilename << ", Binary length: " << binaryLength << std::endl;
 
-    // Open the output file in binary mode
     std::ofstream outputFile(outputFilename, std::ios::binary);
+    std::vector<unsigned char> outputBuffer(std::min(static_cast<size_t>(1024 * 1024), static_cast<size_t>(binaryLength)));
 
-    // Read and decrypt the pixel data
     uint_fast64_t total_bits_processed = 0;
-    for (int_fast32_t y = reader.getHeight() - 1; y >= 0; --y) {
-        for (int_fast32_t x = 0; x < reader.getWidth(); ++x) {
+    size_t bufferPos = 0;
+
+    for (int_fast32_t y = reader.getHeight() - 1; y >= 0 && total_bits_processed < binaryLength; --y) {
+        for (int_fast32_t x = 0; x < reader.getWidth() && total_bits_processed < binaryLength; ++x) {
             unsigned char byte = reader.getNextByte();
-            if (reader.isEndOfFile() || total_bits_processed >= binaryLength) {
+            if (reader.isEndOfFile()) {
                 break;
             }
-            // Write the decrypted byte to the output file
-            outputFile.write(reinterpret_cast<const char*>(&byte), sizeof(byte));
+            outputBuffer[bufferPos++] = byte;
             total_bits_processed += 8;
+
+            if (bufferPos == outputBuffer.size()) {
+                outputFile.write(reinterpret_cast<const char*>(outputBuffer.data()), bufferPos);
+                bufferPos = 0;
+            }
         }
-        if (total_bits_processed >= binaryLength) {
-            break;
-        }
+    }
+
+    if (bufferPos > 0) {
+        outputFile.write(reinterpret_cast<const char*>(outputBuffer.data()), bufferPos);
     }
 
     outputFile.close();
