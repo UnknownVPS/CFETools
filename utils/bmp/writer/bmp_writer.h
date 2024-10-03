@@ -10,6 +10,13 @@
 #include <cstdint>
 #include <random>
 #include <ctime>
+#include <vector>
+#include <algorithm>
+#include <thread>
+#include <mutex>
+#include <condition_variable>
+#include <queue>
+#include <atomic>
 
 #pragma pack(push, 1)
 struct BMPFileHeader {

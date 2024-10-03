@@ -3,19 +3,25 @@
 
 class PixelGenerator {
 public:
-    PixelGenerator(const std::string& inputFilename, const std::string& key) 
+    PixelGenerator(const std::string& inputFilename, const std::string& key)
         : inputFile(inputFilename, std::ios::binary), key(key), keyIndex(0) {
         std::seed_seq seed(key.begin(), key.end());
         rng.seed(seed);
     }
 
-    std::string getNextPixel() {
-        char bitChar;
-        if (!(inputFile.get(bitChar))) {
-            return ""; // End of file reached
-        }
-        bitChar = encryptByte(bitChar);
-        return std::bitset<8>(bitChar).to_string();
+    std::vector<char> getPixelsBatch(size_t batchSize) {
+        std::vector<char> pixels(batchSize);
+        size_t bytesRead = inputFile.read(pixels.data(), batchSize).gcount();
+        pixels.resize(bytesRead);
+        
+        std::transform(pixels.begin(), pixels.end(), pixels.begin(),
+            [this](char byte) { return encryptByte(byte); });
+
+        return pixels;
+    }
+
+    bool isEOF() const {
+        return inputFile.eof();
     }
 
 private:
@@ -33,18 +39,18 @@ private:
 
 class PixelWriter {
 public:
-    PixelWriter(const std::string& filename, int_fast32_t width, int_fast32_t height, const std::string& key) 
-        : file(filename, std::ios::binary), width(width), height(height), key(key) {
+    PixelWriter(const std::string& filename, int_fast32_t width, int_fast32_t height)
+        : file(filename, std::ios::binary), width(width), height(height) {
         writeHeaders();
     }
 
-    PixelWriter& operator<<(PixelGenerator& generator) {
-        std::string pixelBits = generator.getNextPixel();
-        for (char bit : pixelBits) {
-            bool pixel = bit == '1' ? true : false;
-            writePixel(pixel);
+    void writePixelsBatch(const std::vector<char>& pixels) {
+        for (char byte : pixels) {
+            for (int i = 7; i >= 0; --i) {
+                bool pixel = (byte >> i) & 1;
+                writePixel(pixel);
+            }
         }
-        return *this;
     }
 
     void finish() {
@@ -68,7 +74,6 @@ private:
     int_fast32_t height;
     unsigned char byte = 0;
     int bits = 0;
-    std::string key;
 
     void writeHeaders() {
         BMPFileHeader fileHeader;
@@ -107,11 +112,8 @@ private:
     }
 
     void writePixel(bool pixel) {
-        byte <<= 1;
-        byte |= pixel ? 1 : 0;
-        ++bits;
-
-        if (bits == 8) {
+        byte = (byte << 1) | (pixel ? 1 : 0);
+        if (++bits == 8) {
             file.write(reinterpret_cast<const char*>(&byte), sizeof(byte));
             byte = 0;
             bits = 0;
@@ -119,28 +121,71 @@ private:
     }
 };
 
+class ThreadSafeQueue {
+public:
+    void push(std::vector<char>&& item) {
+        std::unique_lock<std::mutex> lock(mutex);
+        queue.push(std::move(item));
+        lock.unlock();
+        cond.notify_one();
+    }
+
+    bool pop(std::vector<char>& item) {
+        std::unique_lock<std::mutex> lock(mutex);
+        cond.wait(lock, [this] { return !queue.empty() || done; });
+        if (queue.empty()) return false;
+        item = std::move(queue.front());
+        queue.pop();
+        return true;
+    }
+
+    void setDone() {
+        std::unique_lock<std::mutex> lock(mutex);
+        done = true;
+        lock.unlock();
+        cond.notify_all();
+    }
+
+private:
+    std::queue<std::vector<char>> queue;
+    std::mutex mutex;
+    std::condition_variable cond;
+    bool done = false;
+};
+
 void writeBMP(const std::string& filename, const std::string& inputFilename, const std::string& encryptionKey) {
-    // Calculate the width and height of the image
     Logger::Log(LOG_DEBUG, "Initializing image writer..");
     std::ifstream inputFile(inputFilename, std::ios::binary);
     inputFile.seekg(0, std::ios::end);
     std::streamsize size = inputFile.tellg();
-    inputFile.seekg(0, std::ios::beg);
-    int_fast32_t width = std::ceil(std::sqrt(size * 8)); // Multiply by 8 because each byte is now 8 bits
-    int_fast32_t height = width;
     inputFile.close();
 
-    // Create PixelGenerator and PixelWriter objects
+    int_fast32_t width = std::ceil(std::sqrt(size * 8));
+    int_fast32_t height = width;
+
     Logger::Log(LOG_DEBUG, "Encoding and writing file...");
     PixelGenerator generator(inputFilename, encryptionKey);
-    PixelWriter writer(filename, width, height, encryptionKey);
+    PixelWriter writer(filename, width, height);
 
-    // Write the pixel data
-    for (int_fast32_t y = height - 1; y >= 0; --y) {
-        for (int_fast32_t x = 0; x < width; ++x) {
-            writer << generator;
+    ThreadSafeQueue pixelQueue;
+    std::atomic<bool> writerDone(false);
+
+    std::thread writerThread([&]() {
+        std::vector<char> pixelBatch;
+        while (pixelQueue.pop(pixelBatch)) {
+            writer.writePixelsBatch(pixelBatch);
         }
+        writer.finish();
+        writerDone = true;
+    });
+
+    const size_t batchSize = 1024 * 1024; // 1MB batch size
+    while (!generator.isEOF()) {
+        pixelQueue.push(generator.getPixelsBatch(batchSize));
     }
 
-    writer.finish();
+    pixelQueue.setDone();
+    writerThread.join();
+
+    Logger::Log(LOG_DEBUG, "File processing completed.");
 }
