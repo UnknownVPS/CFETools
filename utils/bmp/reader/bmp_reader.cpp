@@ -1,7 +1,5 @@
 #include "bmp_reader.h"
-#include <vector>
-#include <thread>
-#include <algorithm>
+#include "../../logger/logger.h"
 
 class PixelReader {
 public:
@@ -71,7 +69,6 @@ private:
 
 void readBMP(const std::string& filename, const std::string& outputFilename, uint_fast64_t binaryLength, const std::string& encryptionKey) {  
     PixelReader reader(filename, encryptionKey);
-    std::cout << "Output file: " << outputFilename << ", Binary length: " << binaryLength << std::endl;
 
     std::ofstream outputFile(outputFilename, std::ios::binary);
     std::vector<unsigned char> outputBuffer(std::min(static_cast<size_t>(1024 * 1024), static_cast<size_t>(binaryLength)));
@@ -100,5 +97,5 @@ void readBMP(const std::string& filename, const std::string& outputFilename, uin
     }
 
     outputFile.close();
-    std::cout << "Decryption complete. Output written to: " << outputFilename << std::endl;
+    Logger::Log(LOG_INFO, "Decryption complete. Output written to: " + outputFilename);
 }
