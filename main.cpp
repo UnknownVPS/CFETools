@@ -1,6 +1,7 @@
 #include "utils/logger/logger.h" 
 #include "func/img_creation/create_img.h"
 #include "func/file_creation/create_file.h"
+#include "func/folder_packer/folder_packer.h"
 #include "utils/userinput/user_input.h"
 #include "version.h"
 bool isDebugMode = false;
@@ -75,13 +76,42 @@ int main(int argc, char* argv[]) {
 
     if (input == "img") {
         if (file_path.empty()) {
-            file_path = inputprompt.ask("Please enter the file to be encoded path: ");
-            if (!filesystem::exists(file_path)) {
-                Logger::Log(LOG_ERROR, "File path is invalid. Please recheck.");
+            file_path = inputprompt.ask("Please enter the file or folder to be encoded path: ");
+            if (!std::filesystem::exists(file_path)) {
+                Logger::Log(LOG_ERROR, "Path is invalid. Please recheck.");
                 return 404;
             }
         }
-        create_img(file_path, save_path);
+
+        std::filesystem::path inputPath(file_path);
+        std::string path_to_encode;
+
+        if (std::filesystem::is_directory(inputPath)) {
+            // Prepare packed file path alongside input folder
+            std::string packedFileName = inputPath.filename().string() + ".cfup";
+            std::filesystem::path packedFilePath = inputPath.parent_path() / packedFileName;
+
+            Logger::Log(LOG_INFO, "Input is a folder. Packing it into: " + packedFilePath.string());
+
+            if (!pack_folder(file_path, packedFilePath.string())) {
+                Logger::Log(LOG_ERROR, "Failed to pack folder: " + file_path);
+                return 1;
+            }
+
+            path_to_encode = packedFilePath.string();
+        } else if (std::filesystem::is_regular_file(inputPath)) {
+            path_to_encode = file_path;
+        } else {
+            Logger::Log(LOG_ERROR, "Provided path is neither a file nor a folder: " + file_path);
+            return 404;
+        }
+
+        create_img(path_to_encode, save_path);
+
+        if (std::filesystem::is_directory(inputPath)) {
+            std::filesystem::remove(path_to_encode);
+            Logger::Log(LOG_DEBUG, "Removed temporary packed file: " + path_to_encode);
+        }
     } else if (input == "file") {
         if (file_path.empty()) {
             file_path = inputprompt.ask("Please enter the image to be decoded path: ");

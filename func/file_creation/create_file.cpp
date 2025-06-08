@@ -2,6 +2,7 @@
 #include "../../utils/bmp/reader/bmp_reader.h"
 #include "../../utils/json/json.h"
 #include "../../utils/logger/logger.h"
+#include "../folder_packer/folder_packer.h"
 
 void create_file(const std::string& bmp_file_path, const std::string& save_path) {
     // Get the directory and stem (filename without extension) of the BMP file
@@ -26,9 +27,22 @@ void create_file(const std::string& bmp_file_path, const std::string& save_path)
 
     // Retrieve the encryption key from the Data structure
     std::string encryptionKey = data.encryption_key; // Get the encryption key from the read JSON data
+    std::string reconstructedFilePath = save_path + "/" + original_filename;
 
     // Read and reconstruct the BMP file using the encryption key
-    readBMP(bmp_file_path, save_path + "/" + original_filename, binary_length, encryptionKey);
+    readBMP(bmp_file_path, reconstructedFilePath, binary_length / 8, encryptionKey);
 
     Logger::Log(LOG_INFO, "Original file reconstructed successfully.");
+    // Check if the reconstructed file has ".cfup" extension
+    if (original_filename.size() > 5 && original_filename.compare(original_filename.size() - 5, 5, ".cfup") == 0) {
+        Logger::Log(LOG_INFO, "Detected .cfup file, starting unpacking...");
+
+        std::string unpackedFolder = fs::path(save_path) / fs::path(original_filename).stem().string();
+
+        if (!unpack_packed_file(reconstructedFilePath, unpackedFolder)) {
+            Logger::Log(LOG_ERROR, "Failed to unpack the .cfup file: " + reconstructedFilePath);
+        } else {
+            Logger::Log(LOG_INFO, "Unpacking completed successfully at: " + unpackedFolder);
+        }
+    }
 }

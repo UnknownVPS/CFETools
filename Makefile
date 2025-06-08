@@ -1,8 +1,8 @@
 # Variables
 CXX = g++
-CXXFLAGS = -Wall -std=c++17 -O3 -pthread -static-libstdc++
+CXXFLAGS = -Wall -std=c++17 -O3 -pthread -static-libstdc++ -lsodium
 TARGET = cfx
-SRCS = utils/userinput/user_input.cpp utils/bmp/writer/bmp_writer.cpp utils/bmp/reader/bmp_reader.cpp utils/json/json.cpp func/img_creation/create_img.cpp func/file_creation/create_file.cpp utils/logger/logger.cpp main.cpp
+SRCS = utils/userinput/user_input.cpp utils/bmp/writer/bmp_writer.cpp utils/bmp/reader/bmp_reader.cpp utils/json/json.cpp func/img_creation/create_img.cpp func/file_creation/create_file.cpp utils/logger/logger.cpp func/folder_packer/folder_packer.cpp main.cpp
 OBJS = $(SRCS:.cpp=.o)
 WIN_CXX = x86_64-w64-mingw32-g++
 WIN_TARGET = $(TARGET).exe 
