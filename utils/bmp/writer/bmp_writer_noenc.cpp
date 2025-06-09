@@ -5,7 +5,7 @@
 #include <cmath>
 #include <vector>
 #include <filesystem>
-
+#include <cstdint>
 void writeBMPNoEncrypt(const std::string& filename, const std::string& inputFilename) {
     Logger::Log(LOG_DEBUG, "Initializing image writer (no encryption)..");
 
