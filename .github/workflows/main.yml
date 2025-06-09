@@ -3,139 +3,145 @@ name: Build Multi-Platform Binaries
 on:
   push:
     branches: [ main, dev ]
-    tags: [ 'v*' ]
   pull_request:
     branches: [ main ]
   workflow_dispatch:
 
 jobs:
-  build-linux:
+  set-version:
     runs-on: ubuntu-latest
-    
+    outputs:
+      version: ${{ steps.setver.outputs.version }}
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-    
-    - name: Install dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y build-essential libsodium-dev
-    
-    - name: Build Linux binary
-      run: |
-        make clean
-        make
-    
-    - name: Upload Linux artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: cfx-linux
-        path: cfx
-        retention-days: 30
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # needed for tag counting
+
+      - name: Set version and update version.h
+        id: setver
+        run: |
+          DATE=$(date +'%y%m.%d')
+          COUNT=$(git tag --list "v$DATE.*" | wc -l)
+          TAG="v$DATE.$((COUNT + 1))"
+          echo "version=$TAG" >> $GITHUB_OUTPUT
+
+          # Update version.h
+          MAJOR=$(echo $TAG | cut -d'.' -f1 | sed 's/v//')
+          MINOR=$(echo $TAG | cut -d'.' -f2)
+          PATCH=$(echo $TAG | cut -d'.' -f3)
+          echo "#ifndef VERSION_H
+#define VERSION_H
+#define VERSION_MAJOR \"$MAJOR\"
+#define VERSION_MINOR \"$MINOR\"
+#define REVISION \"$PATCH\"
+#define VERSION VERSION_MAJOR \".\" VERSION_MINOR \".\" REVISION
+#endif" > version.h
+
+      - name: Commit version.h and create tag
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git add version.h
+          git commit -m "Update version to ${{ steps.setver.outputs.version }}"
+          git tag ${{ steps.setver.outputs.version }}
+          git push origin HEAD
+          git push origin ${{ steps.setver.outputs.version }}
+
+  build-linux:
+    needs: set-version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y build-essential libsodium-dev
+      - name: Build Linux binary
+        run: make clean && make
+      - name: Upload Linux artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cfx-linux
+          path: cfx
+          retention-days: 30
 
   build-windows:
+    needs: set-version
     runs-on: ubuntu-latest
-    
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-    
-    - name: Install MinGW cross-compiler
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y mingw-w64 gcc-mingw-w64-x86-64
-        sudo update-alternatives --set x86_64-w64-mingw32-gcc /usr/bin/x86_64-w64-mingw32-gcc-posix
-        sudo update-alternatives --set x86_64-w64-mingw32-g++ /usr/bin/x86_64-w64-mingw32-g++-posix
-        
-    - name: Install libsodium for Windows
-      run: |
-        # Download and build libsodium for Windows
-        make install-libsodium-win
-    
-    - name: Build Windows binary
-      run: |
-        # Create temporary link flags for Windows build
-        make clean
-        make windows
-    - name: Upload Windows artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: cfx-windows
-        path: cfx.exe
-        retention-days: 30
+      - uses: actions/checkout@v4
+      - name: Install MinGW
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y mingw-w64 gcc-mingw-w64-x86-64
+          sudo update-alternatives --set x86_64-w64-mingw32-gcc /usr/bin/x86_64-w64-mingw32-gcc-posix
+          sudo update-alternatives --set x86_64-w64-mingw32-g++ /usr/bin/x86_64-w64-mingw32-g++-posix
+      - name: Install libsodium for Windows
+        run: make install-libsodium-win
+      - name: Build Windows binary
+        run: make clean && make windows
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cfx-windows
+          path: cfx.exe
+          retention-days: 30
 
   build-android:
+    needs: set-version
     runs-on: ubuntu-latest
-    
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-    
-    - name: Setup Android NDK
-      run: |
-        # Download Android NDK
-        wget https://dl.google.com/android/repository/android-ndk-r27c-linux.zip
-        unzip -q android-ndk-r27c-linux.zip
-        mv android-ndk-r27c $HOME/android-ndk-r27c
-    
-    - name: Update Makefile for CI
-      run: |
-        # Update NDK path in Makefile for CI environment
-        sed -i 's|/home/codespace/android-ndk-r27c|'$HOME'/android-ndk-r27c|g' Makefile
-    
-    - name: Build libsodium for Android
-      run: |
-        make install-libsodium
-    
-    - name: Build Android binary
-      run: |
-        make clean
-        make android
-    
-    - name: Upload Android artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: cfx-android
-        path: cfx.android
-        retention-days: 30
+      - uses: actions/checkout@v4
+      - name: Setup Android NDK
+        run: |
+          wget https://dl.google.com/android/repository/android-ndk-r27c-linux.zip
+          unzip -q android-ndk-r27c-linux.zip
+          mv android-ndk-r27c $HOME/android-ndk-r27c
+      - name: Update Makefile for CI
+        run: sed -i "s|/home/codespace/android-ndk-r27c|$HOME/android-ndk-r27c|g" Makefile
+      - name: Build libsodium for Android
+        run: make install-libsodium
+      - name: Build Android binary
+        run: make clean && make android
+      - name: Upload Android artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cfx-android
+          path: cfx.android
+          retention-days: 30
 
   create-release:
-    needs: [build-linux, build-windows, build-android]
+    needs: [build-linux, build-windows, build-android, set-version]
     runs-on: ubuntu-latest
-    
     steps:
-    - name: Download all artifacts
-      uses: actions/download-artifact@v4
-      with:
-        path: artifacts
-    
-    - name: Create release directory
-      run: |
-        mkdir -p release
-        cp artifacts/cfx-linux/cfx release/cfx-linux
-        cp artifacts/cfx-windows/cfx.exe release/cfx-windows.exe
-        cp artifacts/cfx-android/cfx.android release/cfx-android
-        
-        # Make binaries executable
-        chmod +x release/cfx-linux
-        chmod +x release/cfx-android
-    
-    - name: Create Release
-      uses: softprops/action-gh-release@v1
-      with:
-        files: |
-          release/cfx-linux
-          release/cfx-windows.exe
-          release/cfx-android
-        body: |
-          ## Downloads
-          
-          - **Linux**: cfx-linux
-          - **Windows**: cfx-windows.exe  
-          - **Android**: cfx-android
-          
-          Built automatically from commit ${{ github.sha }}
-        draft: false
-        prerelease: false
-      env:
-        GITHUB_TOKEN: ${{ secrets.GIT_TOKEN }}
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create release directory
+        run: |
+          mkdir -p release
+          cp artifacts/cfx-linux/cfx release/cfx-linux
+          cp artifacts/cfx-windows/cfx.exe release/cfx-windows.exe
+          cp artifacts/cfx-android/cfx.android release/cfx-android
+          chmod +x release/cfx-linux release/cfx-android
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ needs.set-version.outputs.version }}
+          name: Release ${{ needs.set-version.outputs.version }}
+          files: |
+            release/cfx-linux
+            release/cfx-windows.exe
+            release/cfx-android
+          body: |
+            ## Downloads
+
+            - **Linux**: `cfx-linux`
+            - **Windows**: `cfx-windows.exe`
+            - **Android**: `cfx-android`
+
+            Version: `${{ needs.set-version.outputs.version }}`
+        env:
+          GITHUB_TOKEN: ${{ secrets.GIT_TOKEN }}
