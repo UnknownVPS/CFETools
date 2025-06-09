@@ -102,7 +102,6 @@ jobs:
   create-release:
     needs: [build-linux, build-windows, build-android]
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v')
     
     steps:
     - name: Download all artifacts
