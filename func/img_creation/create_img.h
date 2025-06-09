@@ -8,4 +8,4 @@
 
 using namespace std;
 
-void create_img(const string& file_path, const string& save_path);
+void create_img(const string& file_path, const string& save_path, bool no_encrypt = false);

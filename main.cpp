@@ -1,9 +1,11 @@
-#include "utils/logger/logger.h" 
+#include "utils/logger/logger.h"
 #include "func/img_creation/create_img.h"
 #include "func/file_creation/create_file.h"
 #include "func/folder_packer/folder_packer.h"
 #include "utils/userinput/user_input.h"
 #include "version.h"
+#include <filesystem>
+#include <cstdlib>
 bool isDebugMode = false;
 
 int main(int argc, char* argv[]) {
@@ -14,6 +16,7 @@ int main(int argc, char* argv[]) {
     Logger::SetLevel(LOG_INFO);
     bool file_flag = false;
     bool img_flag = false;
+    bool no_encrypt = false;
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
         if (arg == "--debug") {
@@ -21,9 +24,12 @@ int main(int argc, char* argv[]) {
             Logger::SetLevel(LOG_DEBUG);
             Logger::Log(LOG_DEBUG, "Running in DEBUG mode.");
             Logger::Log(LOG_DEBUG, "Using version: " VERSION);
+        } else if (arg == "--no-encrypt") {
+            no_encrypt = true;
+            Logger::Log(LOG_INFO, "Encryption will be skipped.");
         } else if (arg.substr(0, 6) == "--img=") {
             if (file_flag) {
-                Logger::Log(LOG_ERROR, "Both --file and --img options provided.");
+                Logger::Log(LOG_ERROR, "Cannot use --img and --file together.");
                 return 1;
             }
             img_flag = true;
@@ -31,20 +37,21 @@ int main(int argc, char* argv[]) {
             input = "img";
         } else if (arg.substr(0, 7) == "--file=") {
             if (img_flag) {
-                Logger::Log(LOG_ERROR, "Both --file and --img options provided.");
+                Logger::Log(LOG_ERROR, "Cannot use --img and --file together.");
                 return 1;
             }
             file_flag = true;
             file_path = arg.substr(7);
             input = "file";
-        } else if (arg == "--version" || arg == "-v") {
-            Logger::Log(LOG_INFO, "Currently using CFET Version: " VERSION " By UnknownVPS ©");
+        } 
+        else if (arg == "--version") {
+            Logger::Log(LOG_INFO, "CFET-Tools version: " VERSION);
             return 0;
         } else {
-            Logger::Log(LOG_ERROR, "Unrecognised command line input: " + arg);
-            return 102;
+            Logger::Log(LOG_ERROR, "Unknown argument: " + arg);
+            return 1;
         }
-    } 
+    }
     Logger::Log(LOG_DEBUG, "Checking directory status");
     #ifdef _WIN32
         home = std::getenv("USERPROFILE");
@@ -56,8 +63,7 @@ int main(int argc, char* argv[]) {
 
     if (home != nullptr) {
         std::filesystem::path tool_dir(home);
-        tool_dir /= "CFET-Tools"; // Append "CFET-Tools" to the path
-
+        tool_dir /= "CFET-Tools";
         if (!std::filesystem::exists(tool_dir)) {
             Logger::Log(LOG_INFO, "Directory does not exist. Creating..");
             std::filesystem::create_directory(tool_dir);
@@ -87,14 +93,13 @@ int main(int argc, char* argv[]) {
         std::string path_to_encode;
 
         if (std::filesystem::is_directory(inputPath)) {
-            // Prepare packed file path alongside input folder
             std::string packedFileName = inputPath.filename().string() + ".cfup";
             std::filesystem::path packedFilePath = inputPath.parent_path() / packedFileName;
 
             Logger::Log(LOG_INFO, "Input is a folder. Packing it into: " + packedFilePath.string());
 
             if (!pack_folder(file_path, packedFilePath.string())) {
-                Logger::Log(LOG_ERROR, "Failed to pack folder: " + file_path);
+                Logger::Log(LOG_ERROR, "Failed to pack folder.");
                 return 1;
             }
 
@@ -102,11 +107,11 @@ int main(int argc, char* argv[]) {
         } else if (std::filesystem::is_regular_file(inputPath)) {
             path_to_encode = file_path;
         } else {
-            Logger::Log(LOG_ERROR, "Provided path is neither a file nor a folder: " + file_path);
-            return 404;
+            Logger::Log(LOG_ERROR, "Input path is not a file or folder.");
+            return 1;
         }
 
-        create_img(path_to_encode, save_path);
+        create_img(path_to_encode, save_path, no_encrypt);
 
         if (std::filesystem::is_directory(inputPath)) {
             std::filesystem::remove(path_to_encode);
@@ -114,9 +119,9 @@ int main(int argc, char* argv[]) {
         }
     } else if (input == "file") {
         if (file_path.empty()) {
-            file_path = inputprompt.ask("Please enter the image to be decoded path: ");
-            if (!filesystem::exists(file_path)) {
-                Logger::Log(LOG_ERROR, "Image path is invalid. Please recheck.");
+            file_path = inputprompt.ask("Please enter the BMP file to decode: ");
+            if (!std::filesystem::exists(file_path)) {
+                Logger::Log(LOG_ERROR, "Path is invalid. Please recheck.");
                 return 404;
             }
         }

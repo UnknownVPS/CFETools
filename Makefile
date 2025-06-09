@@ -14,7 +14,7 @@ LIBSODIUM_WIN_LIB = $(LIBSODIUM_WIN_ROOT)/lib
 
 # Compiler flags
 COMPILE_FLAGS = -Wall -std=c++17 -O3 -pthread
-LINK_FLAGS = -lsodium -static-libstdc++
+LINK_FLAGS = -lsodium -static-libstdc++ -pthread
 ANDROID_COMPILE_FLAGS = $(COMPILE_FLAGS) -I$(LIBSODIUM_INCLUDE)
 ANDROID_LINK_FLAGS = -L$(LIBSODIUM_LIB) -lsodium -static-libstdc++
 WIN_COMPILE_FLAGS = $(COMPILE_FLAGS) -I$(LIBSODIUM_WIN_INCLUDE)
@@ -28,7 +28,9 @@ ANDROID_TARGET = $(TARGET).android
 # Source files
 SRCS = utils/userinput/user_input.cpp \
        utils/bmp/writer/bmp_writer.cpp \
+       utils/bmp/writer/bmp_writer_noenc.cpp \
        utils/bmp/reader/bmp_reader.cpp \
+       utils/bmp/reader/bmp_reader_noenc.cpp \
        utils/json/json.cpp \
        func/img_creation/create_img.cpp \
        func/file_creation/create_file.cpp \
