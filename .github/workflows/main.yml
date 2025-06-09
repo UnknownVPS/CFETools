@@ -83,19 +83,17 @@ jobs:
           cp artifacts/cfx-android/cfx.android release/cfx-android
           chmod +x release/cfx-linux release/cfx-android
 
-      - name: Zip binaries
-        run: |
-          cd release
-          zip -r dist.zip *
-
       - name: Create GitHub Release (automatic)
         uses: marvinpinto/action-automatic-releases@latest
         with:
-          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          repo_token: ${{ secrets.GIT_TOKEN }}
           automatic_release_tag: "latest"
           prerelease: false
           title: "Multi-Platform Build"
-          files: release/dist.zip
+          files: |
+            release/cfx-linux
+            release/cfx-windows.exe
+            release/cfx-android
           body: |
             This release includes freshly built binaries for the following platforms:
 
