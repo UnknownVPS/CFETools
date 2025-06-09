@@ -8,48 +8,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  set-version:
-    runs-on: ubuntu-latest
-    outputs:
-      version: ${{ steps.setver.outputs.version }}
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0  # needed for tag counting
-
-      - name: Set version and update version.h
-        id: setver
-        run: |
-          DATE=$(date +'%y%m.%d')
-          COUNT=$(git tag --list "v$DATE.*" | wc -l)
-          TAG="v$DATE.$((COUNT + 1))"
-          echo "version=$TAG" >> $GITHUB_OUTPUT
-
-          # Update version.h
-          MAJOR=$(echo $TAG | cut -d'.' -f1 | sed 's/v//')
-          MINOR=$(echo $TAG | cut -d'.' -f2)
-          PATCH=$(echo $TAG | cut -d'.' -f3)
-          echo "#ifndef VERSION_H
-#define VERSION_H
-#define VERSION_MAJOR \"$MAJOR\"
-#define VERSION_MINOR \"$MINOR\"
-#define REVISION \"$PATCH\"
-#define VERSION VERSION_MAJOR \".\" VERSION_MINOR \".\" REVISION
-#endif" > version.h
-
-      - name: Commit version.h and create tag
-        run: |
-          git config user.name "github-actions"
-          git config user.email "github-actions@github.com"
-          git add version.h
-          git commit -m "Update version to ${{ steps.setver.outputs.version }}"
-          git tag ${{ steps.setver.outputs.version }}
-          git push origin HEAD
-          git push origin ${{ steps.setver.outputs.version }}
-
   build-linux:
-    needs: set-version
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -65,7 +24,6 @@ jobs:
           retention-days: 30
 
   build-windows:
-    needs: set-version
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -87,7 +45,6 @@ jobs:
           retention-days: 30
 
   build-android:
-    needs: set-version
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -110,7 +67,7 @@ jobs:
           retention-days: 30
 
   create-release:
-    needs: [build-linux, build-windows, build-android, set-version]
+    needs: [build-linux, build-windows, build-android]
     runs-on: ubuntu-latest
     steps:
       - name: Download all artifacts
@@ -126,22 +83,24 @@ jobs:
           cp artifacts/cfx-android/cfx.android release/cfx-android
           chmod +x release/cfx-linux release/cfx-android
 
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v1
+      - name: Zip binaries
+        run: |
+          cd release
+          zip -r dist.zip *
+
+      - name: Create GitHub Release (automatic)
+        uses: marvinpinto/action-automatic-releases@latest
         with:
-          tag_name: ${{ needs.set-version.outputs.version }}
-          name: Release ${{ needs.set-version.outputs.version }}
-          files: |
-            release/cfx-linux
-            release/cfx-windows.exe
-            release/cfx-android
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          automatic_release_tag: "latest"
+          prerelease: false
+          title: "Multi-Platform Build"
+          files: release/dist.zip
           body: |
-            ## Downloads
+            This release includes freshly built binaries for the following platforms:
 
-            - **Linux**: `cfx-linux`
-            - **Windows**: `cfx-windows.exe`
-            - **Android**: `cfx-android`
+            - **Linux** (`cfx-linux`)
+            - **Windows** (`cfx-windows.exe`)
+            - **Android** (`cfx-android`)
 
-            Version: `${{ needs.set-version.outputs.version }}`
-        env:
-          GITHUB_TOKEN: ${{ secrets.GIT_TOKEN }}
+            Each file is compiled and packaged from the latest commit to `main` or `dev`.
