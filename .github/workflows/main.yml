@@ -1,47 +1,148 @@
-name: Build and Release
+name: Build Multi-Platform Binaries
 
 on:
   push:
-    branches:
-      - main  # Adjust this branch name if needed
+    branches: [ main, dev ]
+    tags: [ 'v*' ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
 
 jobs:
-  build:
+  build-linux:
     runs-on: ubuntu-latest
-
+    
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v2
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y build-essential libsodium-dev
+    
+    - name: Build Linux binary
+      run: |
+        make clean
+        make
+    
+    - name: Upload Linux artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: cfx-linux
+        path: cfx
+        retention-days: 30
 
-      - name: Build with make
-        run: make  # Replace with your actual build command
+  build-windows:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Install MinGW cross-compiler
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y mingw-w64 gcc-mingw-w64-x86-64
+    
+    - name: Install libsodium for Windows
+      run: |
+        # Download and build libsodium for Windows
+        wget https://download.libsodium.org/libsodium/releases/libsodium-1.0.19.tar.gz
+        tar -xzf libsodium-1.0.19.tar.gz
+        cd libsodium-stable
+        ./configure --host=x86_64-w64-mingw32 --prefix=$PWD/../libsodium-win --disable-shared --enable-static
+        make -j$(nproc)
+        make install
+        cd ..
+    
+    - name: Build Windows binary
+      run: |
+        # Create temporary link flags for Windows build
+        export WIN_LIBSODIUM_LIB="-L$PWD/libsodium-win/lib -lsodium"
+        make clean
+        make windows LINK_FLAGS="$WIN_LIBSODIUM_LIB -static-libstdc++ -static-libgcc"
+    
+    - name: Upload Windows artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: cfx-windows
+        path: cfx.exe
+        retention-days: 30
 
-      - name: Get cfx version
-        run: echo 1.0.0 > version.txt
+  build-android:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Setup Android NDK
+      run: |
+        # Download Android NDK
+        wget https://dl.google.com/android/repository/android-ndk-r27c-linux.zip
+        unzip -q android-ndk-r27c-linux.zip
+        mv android-ndk-r27c $HOME/android-ndk-r27c
+    
+    - name: Update Makefile for CI
+      run: |
+        # Update NDK path in Makefile for CI environment
+        sed -i 's|/home/codespace/android-ndk-r27c|'$HOME'/android-ndk-r27c|g' Makefile
+    
+    - name: Build libsodium for Android
+      run: |
+        make install-libsodium
+    
+    - name: Build Android binary
+      run: |
+        make clean
+        make android
+    
+    - name: Upload Android artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: cfx-android
+        path: cfx.android
+        retention-days: 30
 
-      - name: Rename executable
-        run: mv cfx cfet-1.0.0
-
-      - name: Create release
-        id: create_release
-        run: echo "::set-output name=version::1.0.0"
-        env:
-          GITHUB_TOKEN: "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"  # Add your PAT here
-        timeout-minutes: 10
-
-      - name: Upload cfet and version.txt as release assets
-        id: upload_release_assets
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: "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"
-        with:
-          upload_url: https://uploads.github.com/repos/sastatest/releases/${{ steps.create_release.outputs.id }}/assets
-          asset_path: |
-            ./cfet-${{ steps.create_release.outputs.version }}
-            ./version.txt
-          asset_name: |
-            cfet-${{ steps.create_release.outputs.version }}
-            version.txt
-          asset_content_type: |
-            application/octet-stream
-            text/plain
+  create-release:
+    needs: [build-linux, build-windows, build-android]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    
+    steps:
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: artifacts
+    
+    - name: Create release directory
+      run: |
+        mkdir -p release
+        cp artifacts/cfx-linux/cfx release/cfx-linux
+        cp artifacts/cfx-windows/cfx.exe release/cfx-windows.exe
+        cp artifacts/cfx-android/cfx.android release/cfx-android
+        
+        # Make binaries executable
+        chmod +x release/cfx-linux
+        chmod +x release/cfx-android
+    
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        files: |
+          release/cfx-linux
+          release/cfx-windows.exe
+          release/cfx-android
+        body: |
+          ## Downloads
+          
+          - **Linux**: cfx-linux
+          - **Windows**: cfx-windows.exe  
+          - **Android**: cfx-android
+          
+          Built automatically from commit ${{ github.sha }}
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GIT_TOKEN }}
