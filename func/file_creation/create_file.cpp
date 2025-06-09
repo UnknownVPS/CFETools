@@ -37,7 +37,7 @@ void create_file(const std::string& bmp_file_path, const std::string& save_path)
     if (original_filename.size() > 5 && original_filename.compare(original_filename.size() - 5, 5, ".cfup") == 0) {
         Logger::Log(LOG_INFO, "Detected .cfup file, starting unpacking...");
 
-        std::string unpackedFolder = fs::path(save_path) / fs::path(original_filename).stem().string();
+        std::string unpackedFolder = (fs::path(save_path) / fs::path(original_filename).stem()).string();
 
         if (!unpack_packed_file(reconstructedFilePath, unpackedFolder)) {
             Logger::Log(LOG_ERROR, "Failed to unpack the .cfup file: " + reconstructedFilePath);

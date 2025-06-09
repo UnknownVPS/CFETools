@@ -44,25 +44,19 @@ jobs:
       run: |
         sudo apt-get update
         sudo apt-get install -y mingw-w64 gcc-mingw-w64-x86-64
-    
+    		sudo update-alternatives --set x86_64-w64-mingw32-gcc /usr/bin/x86_64-w64-mingw32-gcc-posix
+        sudo update-alternatives --set x86_64-w64-mingw32-g++ /usr/bin/x86_64-w64-mingw32-g++-posix
+
     - name: Install libsodium for Windows
       run: |
         # Download and build libsodium for Windows
-        wget https://download.libsodium.org/libsodium/releases/libsodium-1.0.19.tar.gz
-        tar -xzf libsodium-1.0.19.tar.gz
-        cd libsodium-stable
-        ./configure --host=x86_64-w64-mingw32 --prefix=$PWD/../libsodium-win --disable-shared --enable-static
-        make -j$(nproc)
-        make install
-        cd ..
+        make install-libsodium-win
     
     - name: Build Windows binary
       run: |
         # Create temporary link flags for Windows build
-        export WIN_LIBSODIUM_LIB="-L$PWD/libsodium-win/lib -lsodium"
         make clean
-        make windows LINK_FLAGS="$WIN_LIBSODIUM_LIB -static-libstdc++ -static-libgcc"
-    
+        make windows
     - name: Upload Windows artifact
       uses: actions/upload-artifact@v4
       with:
