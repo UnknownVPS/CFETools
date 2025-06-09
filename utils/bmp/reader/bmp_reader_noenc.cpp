@@ -4,6 +4,7 @@
 #include <fstream>
 #include <vector>
 #include <cstdint>
+
 void readBMPNoEncrypt(const std::string& filename, const std::string& outputFilename, uint_fast64_t binaryLength) {
     Logger::Log(LOG_DEBUG, "Initializing BMP reader (no encryption)..");
 
