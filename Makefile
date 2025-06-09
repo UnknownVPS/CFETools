@@ -95,16 +95,16 @@ check-libsodium-win:
 # Install libsodium for Android
 install-libsodium:
 	@echo "Building libsodium for Android..."
-	@if [ ! -f "libsodium-1.0.19.tar.gz" ]; then \
+	@if [ ! -f "libsodium-1.0.20.tar.gz" ]; then \
 		echo "Downloading libsodium..."; \
-		wget https://download.libsodium.org/libsodium/releases/libsodium-1.0.19.tar.gz; \
+		wget https://github.com/jedisct1/libsodium/releases/download/1.0.20-RELEASE/libsodium-1.0.20.tar.gz; \
 	fi
-	@if [ ! -d "libsodium-1.0.19" ]; then \
+	@if [ ! -d "libsodium-1.0.20" ]; then \
 		echo "Extracting libsodium..."; \
-		tar -xzf libsodium-1.0.19.tar.gz; \
+		tar -xzf libsodium-1.0.20.tar.gz; \
 	fi
 	@if [ ! -d "$(LIBSODIUM_ROOT)" ]; then \
-		cd libsodium-stable && \
+		cd libsodium-1.0.20 && \
 		export CC="$(ANDROID_NDK)/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang" && \
 		export CXX="$(ANDROID_NDK)/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang++" && \
 		export AR="$(ANDROID_NDK)/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar" && \
@@ -139,16 +139,16 @@ install-libsodium:
 # Install libsodium for Windows
 install-libsodium-win:
 	@echo "Building libsodium for Windows..."
-	@if [ ! -f "libsodium-1.0.19.tar.gz" ]; then \
+	@if [ ! -f "libsodium-1.0.20.tar.gz" ]; then \
 		echo "Downloading libsodium..."; \
-		wget https://download.libsodium.org/libsodium/releases/libsodium-1.0.19.tar.gz; \
+		wget https://github.com/jedisct1/libsodium/releases/download/1.0.20-RELEASE/libsodium-1.0.20.tar.gz; \
 	fi
-	@if [ ! -d "libsodium-1.0.19" ]; then \
+	@if [ ! -d "libsodium-1.0.20" ]; then \
 		echo "Extracting libsodium..."; \
-		tar -xzf libsodium-1.0.19.tar.gz; \
+		tar -xzf libsodium-1.0.20.tar.gz; \
 	fi
 	@if [ ! -d "$(LIBSODIUM_WIN_ROOT)" ]; then \
-		cd libsodium-stable && \
+		cd libsodium-1.0.20 && \
 		./configure \
 			--host=x86_64-w64-mingw32 \
 			--prefix=$(PWD)/libsodium-win \

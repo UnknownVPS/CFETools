@@ -59,7 +59,7 @@ void writeBMPNoEncrypt(const std::string& filename, const std::string& inputFile
         }
     }
     // Padding
-    int currentSize = file.tellp() - fileHeader.offset_data;
+    int currentSize = static_cast<int>(file.tellp()) - fileHeader.offset_data;
     if (currentSize < pixelDataSize) {
         std::vector<char> padding(pixelDataSize - currentSize, 0);
         file.write(padding.data(), padding.size());
