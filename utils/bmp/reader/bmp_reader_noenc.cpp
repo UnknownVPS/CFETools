@@ -6,7 +6,7 @@
 #include <cstdint>
 
 void readBMPNoEncrypt(const std::string& filename, const std::string& outputFilename, uint_fast64_t binaryLength) {
-    Logger::Log(LOG_DEBUG, "Initializing BMP reader (no encryption)..");
+    Logger::Log(LOG_DEBUG, "Initializing BMP reader...");
 
     std::ifstream file(filename, std::ios::binary);
     if (!file) {
@@ -20,18 +20,21 @@ void readBMPNoEncrypt(const std::string& filename, const std::string& outputFile
     file.read(reinterpret_cast<char*>(&infoHeader), sizeof(infoHeader));
     file.seekg(sizeof(unsigned int) * 2, std::ios::cur); // skip color table
 
-    file.seekg(fileHeader.offset_data);
+    std::string outFile = outputFilename;
+    uint64_t bin_len = binaryLength;
 
-    std::ofstream outputFile(outputFilename, std::ios::binary);
+    file.seekg(fileHeader.offset_data);
+    Logger::Log(LOG_DEBUG, "Output Filename: " + outFile);
+    std::ofstream outputFile(outFile, std::ios::binary);
     if (!outputFile) {
-        Logger::Log(LOG_ERROR, "Failed to create output file: " + outputFilename);
+        Logger::Log(LOG_ERROR, "Failed to create output file: " + outFile);
         return;
     }
 
     std::vector<char> buffer(1024 * 1024);
     uint_fast64_t totalWritten = 0;
-    while (totalWritten < binaryLength) {
-        uint_fast64_t toRead = std::min<uint_fast64_t>(buffer.size(), binaryLength - totalWritten);
+    while (totalWritten < bin_len) {
+        uint_fast64_t toRead = std::min<uint_fast64_t>(buffer.size(), bin_len - totalWritten);
         file.read(buffer.data(), toRead);
         std::streamsize bytesRead = file.gcount();
         if (bytesRead > 0) {
@@ -42,5 +45,5 @@ void readBMPNoEncrypt(const std::string& filename, const std::string& outputFile
         }
     }
     outputFile.close();
-    Logger::Log(LOG_INFO, "Decryption complete (no encryption). Output written to: " + outputFilename);
+    Logger::Log(LOG_INFO, "Extraction complete. Output written to: " + outFile);
 }

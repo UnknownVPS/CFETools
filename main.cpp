@@ -17,6 +17,7 @@ int main(int argc, char* argv[]) {
     bool file_flag = false;
     bool img_flag = false;
     bool no_encrypt = false;
+    bool aio_mode = false;
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
         if (arg == "--debug") {
@@ -47,6 +48,9 @@ int main(int argc, char* argv[]) {
         else if (arg == "--version") {
             Logger::Log(LOG_INFO, "CFET-Tools version: " VERSION);
             return 0;
+        } else if (arg == "--aio") {
+            aio_mode = true;
+            Logger::Log(LOG_INFO, "AIO mode enabled.");
         } else {
             Logger::Log(LOG_ERROR, "Unknown argument: " + arg);
             return 1;
@@ -111,7 +115,7 @@ int main(int argc, char* argv[]) {
             return 1;
         }
 
-        create_img(path_to_encode, save_path, no_encrypt);
+        create_img(path_to_encode, save_path, no_encrypt, aio_mode);
 
         if (std::filesystem::is_directory(inputPath)) {
             std::filesystem::remove(path_to_encode);
@@ -125,7 +129,7 @@ int main(int argc, char* argv[]) {
                 return 404;
             }
         }
-        create_file(file_path, save_path);
+        create_file(file_path, save_path, aio_mode);
     } else {
         Logger::Log(LOG_ERROR, "Invalid input was received. Exiting");
     }

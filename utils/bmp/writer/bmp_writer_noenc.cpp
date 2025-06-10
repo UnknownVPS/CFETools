@@ -6,8 +6,8 @@
 #include <vector>
 #include <filesystem>
 #include <cstdint>
-void writeBMPNoEncrypt(const std::string& filename, const std::string& inputFilename) {
-    Logger::Log(LOG_DEBUG, "Initializing image writer (no encryption)..");
+void writeBMPNoEncrypt(const std::string& filename, const std::string& inputFilename, bool aio_mode) {
+    Logger::Log(LOG_DEBUG, "Initializing image writer..");
 
     std::ifstream inputFile(inputFilename, std::ios::binary | std::ios::ate);
     if (!inputFile) {
@@ -20,14 +20,18 @@ void writeBMPNoEncrypt(const std::string& filename, const std::string& inputFile
     int_fast32_t width = std::ceil(std::sqrt(size * 8));
     int_fast32_t height = width;
 
-    // Write BMP headers
     std::ofstream file(filename, std::ios::binary);
     BMPFileHeader fileHeader{};
     BMPInfoHeader infoHeader{};
     fileHeader.file_type = 0x4D42;
     fileHeader.reserved1 = 0;
     fileHeader.reserved2 = 0;
-    fileHeader.offset_data = sizeof(BMPFileHeader) + sizeof(BMPInfoHeader) + sizeof(unsigned int) * 2;
+
+    std::string fname = std::filesystem::path(inputFilename).filename().string();
+    uint16_t fname_len = fname.size();
+
+    size_t aio_header_size = aio_mode ? (sizeof(uint64_t) + sizeof(uint16_t) + fname_len) : 0;
+    fileHeader.offset_data = sizeof(BMPFileHeader) + sizeof(BMPInfoHeader) + sizeof(unsigned int) * 2 + aio_header_size;
     infoHeader.size = sizeof(BMPInfoHeader);
     infoHeader.width = width;
     infoHeader.height = height;
@@ -40,14 +44,23 @@ void writeBMPNoEncrypt(const std::string& filename, const std::string& inputFile
     infoHeader.colors_important = 2;
     int rowSize = ((width + 31) / 32) * 4;
     int pixelDataSize = rowSize * abs(height);
-    fileHeader.file_size = sizeof(BMPFileHeader) + sizeof(BMPInfoHeader) + sizeof(unsigned int) * 2 + pixelDataSize;
+    fileHeader.file_size = fileHeader.offset_data + pixelDataSize;
     infoHeader.size_image = pixelDataSize;
+
     file.write(reinterpret_cast<const char*>(&fileHeader), sizeof(fileHeader));
     file.write(reinterpret_cast<const char*>(&infoHeader), sizeof(infoHeader));
     unsigned int colorTable[2] = { 0x00000000, 0x00FFFFFF };
     file.write(reinterpret_cast<const char*>(colorTable), sizeof(colorTable));
 
-    // Write raw data as pixels (no encryption)
+    // --- AIO HEADER ---
+    if (aio_mode) {
+        uint64_t bin_len = size * 8;
+        file.write(reinterpret_cast<const char*>(&bin_len), sizeof(bin_len));
+        file.write(reinterpret_cast<const char*>(&fname_len), sizeof(fname_len));
+        file.write(fname.data(), fname_len);
+    }
+
+    // --- Write data ---
     std::vector<char> buffer(1024 * 1024);
     std::streamsize totalWritten = 0;
     while (!inputFile.eof() && totalWritten < size) {
@@ -65,5 +78,5 @@ void writeBMPNoEncrypt(const std::string& filename, const std::string& inputFile
         file.write(padding.data(), padding.size());
     }
     file.close();
-    Logger::Log(LOG_DEBUG, "File processing completed (no encryption).");
+    Logger::Log(LOG_DEBUG, "File processing completed.");
 }

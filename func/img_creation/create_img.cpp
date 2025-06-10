@@ -16,7 +16,7 @@ std::string generateRandomKey(size_t length) {
     return std::string(key.begin(), key.end());
 }
 
-void create_img(const std::string& file_path, const std::string& save_path, bool no_encrypt) {
+void create_img(const std::string& file_path, const std::string& save_path, bool no_encrypt, bool aio_mode) {
     std::string file_name = std::filesystem::path(file_path).filename().stem().string();
     Logger::Log(LOG_DEBUG, "Opening file for reading");
     std::ifstream inputFile(file_path, std::ios::binary);
@@ -36,11 +36,13 @@ void create_img(const std::string& file_path, const std::string& save_path, bool
     }
     data.encryption_key = encryptionKey;
 
-    Logger::Log(LOG_DEBUG, "Writing JSON file.");
-    write_json(save_path + '/' + file_name + ".mtd", data);
+    if (!aio_mode) {
+        Logger::Log(LOG_DEBUG, "Writing JSON file.");
+        write_json(save_path + '/' + file_name + ".mtd", data);
+    }
 
-    if (no_encrypt) {
-        writeBMPNoEncrypt(save_path + "/" + file_name + ".bmp", file_path);
+    if (no_encrypt || aio_mode) {
+        writeBMPNoEncrypt(save_path + "/" + file_name + ".bmp", file_path, aio_mode);
     } else {
         writeBMP(save_path + "/" + file_name + ".bmp", file_path, encryptionKey);
     }
