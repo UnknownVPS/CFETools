@@ -8,16 +8,12 @@
 #include <iomanip>
 #include <filesystem>
 #include <fstream>
+#include <sodium.h>
 
 std::string generateRandomKey(size_t length) {
-    std::random_device rd;
-    std::uniform_int_distribution<int> dist(0, 255);
-    std::ostringstream oss;
-    for (size_t i = 0; i < length; ++i) {
-        int byte = dist(rd);
-        oss << std::hex << std::setw(2) << std::setfill('0') << byte;
-    }
-    return oss.str();
+    std::vector<uint8_t> key(length);
+    randombytes_buf(key.data(), length);
+    return std::string(key.begin(), key.end());
 }
 
 void create_img(const std::string& file_path, const std::string& save_path, bool no_encrypt) {
