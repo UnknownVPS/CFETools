@@ -1,10 +1,10 @@
-# Variables
+# === Compiler definitions ===
 CXX = g++
 WIN_CXX = x86_64-w64-mingw32-g++
 ANDROID_NDK = /home/codespace/android-ndk-r27c
 ANDROID_CXX = $(ANDROID_NDK)/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang++
 
-# libsodium configuration
+# === Libsodium paths ===
 LIBSODIUM_ROOT = ./libsodium-android
 LIBSODIUM_WIN_ROOT = ./libsodium-win
 LIBSODIUM_INCLUDE = $(LIBSODIUM_ROOT)/include
@@ -12,7 +12,7 @@ LIBSODIUM_LIB = $(LIBSODIUM_ROOT)/lib
 LIBSODIUM_WIN_INCLUDE = $(LIBSODIUM_WIN_ROOT)/include
 LIBSODIUM_WIN_LIB = $(LIBSODIUM_WIN_ROOT)/lib
 
-# Compiler flags
+# === Compiler flags ===
 COMPILE_FLAGS = -Wall -std=c++17 -O3 -pthread
 LINK_FLAGS = -lsodium -static-libstdc++ -pthread
 ANDROID_COMPILE_FLAGS = $(COMPILE_FLAGS) -I$(LIBSODIUM_INCLUDE)
@@ -20,12 +20,13 @@ ANDROID_LINK_FLAGS = -L$(LIBSODIUM_LIB) -lsodium -static-libstdc++
 WIN_COMPILE_FLAGS = $(COMPILE_FLAGS) -I$(LIBSODIUM_WIN_INCLUDE)
 WIN_LINK_FLAGS = -L$(LIBSODIUM_WIN_LIB) -lsodium -static-libstdc++ -static-libgcc
 
-# Targets
+# === Targets ===
 TARGET = cfx
 WIN_TARGET = $(TARGET).exe
 ANDROID_TARGET = $(TARGET).android
+VERSION_FILE = version.h
 
-# Source files
+# === Source and object files ===
 SRCS = utils/userinput/user_input.cpp \
        utils/bmp/writer/bmp_writer.cpp \
        utils/bmp/writer/bmp_writer_noenc.cpp \
@@ -38,34 +39,30 @@ SRCS = utils/userinput/user_input.cpp \
        func/folder_packer/folder_packer.cpp \
        main.cpp
 
-# Object files
 OBJS = $(SRCS:.cpp=.o)
 WIN_OBJS = $(SRCS:.cpp=.win.o)
 ANDROID_OBJS = $(SRCS:.cpp=.android.o)
 
-# Default target
+# === Default build ===
 all: $(TARGET)
 
-# Linux target
 $(TARGET): $(OBJS)
 	@echo "Linking $@"
 	$(CXX) -o $@ $^ $(LINK_FLAGS)
 
-# Windows target
 windows: check-libsodium-win $(WIN_TARGET)
 
 $(WIN_TARGET): $(WIN_OBJS)
 	@echo "Linking $@"
 	$(WIN_CXX) -o $@ $^ $(WIN_LINK_FLAGS)
 
-# Android target
 android: check-libsodium $(ANDROID_TARGET)
 
 $(ANDROID_TARGET): $(ANDROID_OBJS)
 	@echo "Linking $@"
 	$(ANDROID_CXX) -o $@ $^ $(ANDROID_LINK_FLAGS)
 
-# Compilation
+# === Compiling ===
 %.o: %.cpp
 	@echo "Compiling $< for Linux"
 	$(CXX) -c $< -o $@ $(COMPILE_FLAGS)
@@ -78,73 +75,64 @@ $(ANDROID_TARGET): $(ANDROID_OBJS)
 	@echo "Compiling $< for Android"
 	$(ANDROID_CXX) -c $< -o $@ $(ANDROID_COMPILE_FLAGS)
 
-# Check if libsodium is built for Android
+# === Dist build with versioning ===
+dist: $(VERSION_FILE)
+	@echo "Building all targets with versioning..."
+	$(MAKE) all
+	$(MAKE) windows
+	$(MAKE) android
+
+$(VERSION_FILE):
+	@echo "Generating version header..."
+	@VERSION=$$(date +%y%m.%d.%H); \
+	echo "#ifndef VERSION_H" > $(VERSION_FILE); \
+	echo "#define VERSION_H" >> $(VERSION_FILE); \
+	echo "#define VERSION \"$$VERSION\"" >> $(VERSION_FILE); \
+	echo "#endif" >> $(VERSION_FILE)
+
+# === Check libsodium ===
 check-libsodium:
 	@if [ ! -d "$(LIBSODIUM_ROOT)" ]; then \
 		echo "Error: libsodium not found for Android. Run 'make install-libsodium' first."; \
 		exit 1; \
 	fi
 
-# Check if libsodium is built for Windows
 check-libsodium-win:
 	@if [ ! -d "$(LIBSODIUM_WIN_ROOT)" ]; then \
 		echo "Error: libsodium not found for Windows. Run 'make install-libsodium-win' first."; \
 		exit 1; \
 	fi
 
-# Install libsodium for Android
+# === Install libsodium ===
 install-libsodium:
 	@echo "Building libsodium for Android..."
 	@if [ ! -f "libsodium-1.0.20.tar.gz" ]; then \
-		echo "Downloading libsodium..."; \
 		wget https://github.com/jedisct1/libsodium/releases/download/1.0.20-RELEASE/libsodium-1.0.20.tar.gz; \
 	fi
 	@if [ ! -d "libsodium-1.0.20" ]; then \
-		echo "Extracting libsodium..."; \
 		tar -xzf libsodium-1.0.20.tar.gz; \
 	fi
 	@if [ ! -d "$(LIBSODIUM_ROOT)" ]; then \
 		cd libsodium-1.0.20 && \
-		export CC="$(ANDROID_NDK)/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang" && \
-		export CXX="$(ANDROID_NDK)/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang++" && \
+		export CC="$(ANDROID_CXX)" && \
+		export CXX="$(ANDROID_CXX)" && \
 		export AR="$(ANDROID_NDK)/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar" && \
 		export STRIP="$(ANDROID_NDK)/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip" && \
 		export RANLIB="$(ANDROID_NDK)/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ranlib" && \
-		export CFLAGS="-march=armv8-a+crypto" && \
-		export CPPFLAGS="-march=armv8-a+crypto" && \
 		./configure \
 			--host=aarch64-linux-android \
 			--prefix=$(PWD)/libsodium-android \
-			--disable-shared \
-			--enable-static \
-			--disable-pie \
-			--enable-minimal && \
-		make clean && \
-		make -j4 && make install || { \
-			echo "Retrying without crypto flags..."; \
-			make clean && \
-			export CFLAGS="-march=armv8-a" && \
-			export CPPFLAGS="-march=armv8-a" && \
-			./configure \
-				--host=aarch64-linux-android \
-				--prefix=$(PWD)/libsodium-android \
-				--disable-shared \
-				--enable-static \
-				--disable-pie \
-				--enable-minimal \
-				--disable-asm && \
-			make -j4 && make install; } \
+			--disable-shared --enable-static \
+			--disable-pie --enable-minimal && \
+		make clean && make -j4 && make install; \
 	fi
 
-# Install libsodium for Windows
 install-libsodium-win:
 	@echo "Building libsodium for Windows..."
 	@if [ ! -f "libsodium-1.0.20.tar.gz" ]; then \
-		echo "Downloading libsodium..."; \
 		wget https://github.com/jedisct1/libsodium/releases/download/1.0.20-RELEASE/libsodium-1.0.20.tar.gz; \
 	fi
 	@if [ ! -d "libsodium-1.0.20" ]; then \
-		echo "Extracting libsodium..."; \
 		tar -xzf libsodium-1.0.20.tar.gz; \
 	fi
 	@if [ ! -d "$(LIBSODIUM_WIN_ROOT)" ]; then \
@@ -152,31 +140,29 @@ install-libsodium-win:
 		./configure \
 			--host=x86_64-w64-mingw32 \
 			--prefix=$(PWD)/libsodium-win \
-			--disable-shared \
-			--enable-static && \
-		make clean && \
-		make -j4 && make install; \
+			--disable-shared --enable-static && \
+		make clean && make -j4 && make install; \
 	fi
 
-# Clean
+# === Cleanup ===
 clean:
-	rm -f $(TARGET) $(WIN_TARGET) $(ANDROID_TARGET) $(OBJS) $(WIN_OBJS) $(ANDROID_OBJS)
+	rm -f $(TARGET) $(WIN_TARGET) $(ANDROID_TARGET) $(OBJS) $(WIN_OBJS) $(ANDROID_OBJS) $(VERSION_FILE)
 
-# Clean everything including libsodium
 clean-all: clean
-	rm -rf libsodium-1.0.19 libsodium-1.0.19.tar.gz libsodium-android libsodium-win
+	rm -rf libsodium-1.0.20 libsodium-1.0.20.tar.gz libsodium-android libsodium-win
 
-# Help
+# === Help ===
 help:
 	@echo "Available targets:"
 	@echo "  all                  - Build Linux version (default)"
 	@echo "  windows              - Build Windows version"
 	@echo "  android              - Build Android version"
-	@echo "  install-libsodium    - Download and build libsodium for Android"
-	@echo "  install-libsodium-win- Download and build libsodium for Windows"
-	@echo "  clean                - Remove built files"
+	@echo "  dist                 - Build all targets with auto versioning"
+	@echo "  install-libsodium    - Download/build libsodium for Android"
+	@echo "  install-libsodium-win- Download/build libsodium for Windows"
+	@echo "  clean                - Remove build files"
 	@echo "  clean-all            - Remove all files including libsodium"
 	@echo "  help                 - Show this help"
 
-# Phony targets
-.PHONY: all windows android clean clean-all install-libsodium install-libsodium-win check-libsodium check-libsodium-win help
+# === Phony ===
+.PHONY: all windows android clean clean-all install-libsodium install-libsodium-win check-libsodium check-libsodium-win help dist
