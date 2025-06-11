@@ -22,7 +22,7 @@ WIN_LINK_FLAGS = -L$(LIBSODIUM_WIN_LIB) -lsodium -static-libstdc++ -static-libgc
 
 # === Targets ===
 TARGET = cfx
-WIN_TARGET = $(TARGET).exe
+WIN_TARGET = $(TARGET)-windows.exe
 ANDROID_TARGET = $(TARGET)-android
 VERSION_FILE = version.h
 
