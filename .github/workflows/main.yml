@@ -1,5 +1,4 @@
 name: Build Multi-Platform Binaries
-
 on:
   push:
     branches: [ main, dev ]
@@ -10,75 +9,86 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@v4
-
+      
+      - name: Generate version
+        id: version
+        run: |
+          VERSION="v$(date +'%y%m.%d.%H')"
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Generated version: $VERSION"
+      
       - name: Install build dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential libsodium-dev mingw-w64 gcc-mingw-w64-x86-64
-
+      
       - name: Configure MinGW to use POSIX threads
         run: |
           sudo update-alternatives --set x86_64-w64-mingw32-gcc /usr/bin/x86_64-w64-mingw32-gcc-posix
           sudo update-alternatives --set x86_64-w64-mingw32-g++ /usr/bin/x86_64-w64-mingw32-g++-posix
-
+      
       - name: Setup Android NDK
         run: |
           wget https://dl.google.com/android/repository/android-ndk-r27c-linux.zip
           unzip -q android-ndk-r27c-linux.zip
           mv android-ndk-r27c $HOME/android-ndk-r27c
-
+      
       - name: Update Makefile for CI path
         run: sed -i "s|/home/codespace/android-ndk-r27c|$HOME/android-ndk-r27c|g" Makefile
-
+      
       - name: Install libsodium for Linux/Android
         run: make install-libsodium
-
+      
       - name: Install libsodium for Windows
         run: make install-libsodium-win
-
+      
       - name: Build all distributions
         run: make clean && make dist
-
+      
       - name: Upload release artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: cfx-dist
-          path: dist/
+          name: cfx-binaries
+          path: |
+            cfx-linux
+            cfx-windows.exe
+            cfx-android
           retention-days: 30
 
   create-release:
     needs: [build]
     runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev'
     steps:
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
-          path: artifacts
-
-      - name: Create release directory
-        run: |
-          mkdir -p release
-          cp artifacts/cfx-dist/cfx-linux release/cfx-linux
-          cp artifacts/cfx-dist/cfx-windows.exe release/cfx-windows.exe
-          cp artifacts/cfx-dist/cfx-android release/cfx-android
-          chmod +x release/cfx-linux release/cfx-android
-
-      - name: Create GitHub Release (automatic)
+          name: cfx-binaries
+          path: ./
+      
+      - name: Set executable permissions
+        run: chmod +x cfx-linux cfx-android
+      
+      - name: Create GitHub Release
         uses: marvinpinto/action-automatic-releases@latest
         with:
           repo_token: ${{ secrets.GIT_TOKEN }}
-          automatic_release_tag: "latest"
+          automatic_release_tag: ${{ needs.build.outputs.version }}
           prerelease: false
-          title: "Multi-Platform Build"
+          title: "Multi-Platform Build ${{ needs.build.outputs.version }}"
           files: |
-            release/cfx-linux
-            release/cfx-windows.exe
-            release/cfx-android
+            cfx-linux
+            cfx-windows.exe
+            cfx-android
           body: |
             This release includes freshly built binaries for the following platforms:
             - **Linux** (`cfx-linux`)
             - **Windows** (`cfx-windows.exe`)
             - **Android** (`cfx-android`)
-            Built from the latest commit to `main` or `dev` using `make dist`.
+            
+            Built from the latest commit to `${{ github.ref_name }}` using `make dist`.
+            Version: ${{ needs.build.outputs.version }}
