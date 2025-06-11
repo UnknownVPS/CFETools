@@ -47,7 +47,7 @@ jobs:
         run: make install-libsodium-win
       
       - name: Build all distributions
-        run: make clean && make dist
+        run: make clean && make dist && mv cfx cfx-linux
       
       - name: Upload release artifacts
         uses: actions/upload-artifact@v4
