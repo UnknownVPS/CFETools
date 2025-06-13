@@ -17,8 +17,8 @@ COMPILE_FLAGS = -Wall -std=c++17 -O3 -pthread
 LINK_FLAGS = -lsodium -static-libstdc++ -pthread
 ANDROID_COMPILE_FLAGS = $(COMPILE_FLAGS) -I$(LIBSODIUM_INCLUDE)
 ANDROID_LINK_FLAGS = -L$(LIBSODIUM_LIB) -lsodium -static-libstdc++
-WIN_COMPILE_FLAGS = $(COMPILE_FLAGS) -I$(LIBSODIUM_WIN_INCLUDE)
-WIN_LINK_FLAGS = -L$(LIBSODIUM_WIN_LIB) -lsodium -static-libstdc++ -static-libgcc
+WIN_COMPILE_FLAGS = $(COMPILE_FLAGS) -I$(LIBSODIUM_WIN_INCLUDE) --static
+WIN_LINK_FLAGS = -L$(LIBSODIUM_WIN_LIB) -lsodium -static-libstdc++ -static-libgcc --static
 
 # === Targets ===
 TARGET = cfx
@@ -78,9 +78,9 @@ $(ANDROID_TARGET): $(ANDROID_OBJS)
 # === Dist build with versioning ===
 dist: $(VERSION_FILE)
 	@echo "Building all targets with versioning..."
-	$(MAKE) all
+
 	$(MAKE) windows
-	$(MAKE) android
+
 
 $(VERSION_FILE):
 	@echo "Generating version header..."
