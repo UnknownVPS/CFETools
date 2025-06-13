@@ -78,9 +78,9 @@ $(ANDROID_TARGET): $(ANDROID_OBJS)
 # === Dist build with versioning ===
 dist: $(VERSION_FILE)
 	@echo "Building all targets with versioning..."
-
+	$(MAKE) all
 	$(MAKE) windows
-
+	$(MAKE) android
 
 $(VERSION_FILE):
 	@echo "Generating version header..."
