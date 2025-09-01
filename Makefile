@@ -53,8 +53,9 @@ XZ_WIN_LIB = $(XZ_WIN_ROOT)/lib
 # === Compiler flags ===
 COMPILE_FLAGS = -Wall -std=c++17 -O3 -pthread -DUSE_LZ4 -DUSE_ZSTD -DUSE_LIBLZMA
 LINK_FLAGS = -lsodium -static-libstdc++ -pthread -llz4 -lzstd -llzma
-ANDROID_COMPILE_FLAGS = $(COMPILE_FLAGS) -I$(LIBSODIUM_INCLUDE) -I$(LZ4_ANDROID_INCLUDE) -I$(ZSTD_ANDROID_INCLUDE) -I$(XZ_ANDROID_INCLUDE) --static
-ANDROID_LINK_FLAGS = -L$(LIBSODIUM_LIB) -L$(LZ4_ANDROID_LIB) -L$(ZSTD_ANDROID_LIB) -L$(XZ_ANDROID_LIB) -lsodium -llz4 -lzstd -llzma --static -static-libstdc++
+ANDROID_COMPILE_FLAGS = $(COMPILE_FLAGS) -I$(LIBSODIUM_INCLUDE) -I$(LZ4_ANDROID_INCLUDE) -I$(ZSTD_ANDROID_INCLUDE) -I$(XZ_ANDROID_INCLUDE)
+# Example: static for compressors only, dynamic for system libs
+ANDROID_LINK_FLAGS = -L$(LIBSODIUM_LIB) -L$(LZ4_ANDROID_LIB) -L$(ZSTD_ANDROID_LIB) -L$(XZ_ANDROID_LIB) -Wl,-Bstatic -llz4 -lzstd -llzma -Wl,-Bdynamic -lsodium -static-libstdc++
 WIN_COMPILE_FLAGS = $(COMPILE_FLAGS) -I$(LIBSODIUM_WIN_INCLUDE) -I$(LZ4_WIN_INCLUDE) -I$(ZSTD_WIN_INCLUDE) -I$(XZ_WIN_INCLUDE) --static
 WIN_LINK_FLAGS = -L$(LIBSODIUM_WIN_LIB) -L$(LZ4_WIN_LIB) -L$(ZSTD_WIN_LIB) -L$(XZ_WIN_LIB) -lsodium -llz4 -lzstd -llzma -static-libstdc++ -static-libgcc --static
 
