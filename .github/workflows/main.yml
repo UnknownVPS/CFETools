@@ -45,7 +45,13 @@ jobs:
       
       - name: Install libsodium for Windows
         run: make install-libsodium-win
+
+      - name: Build compressors for Android
+        run: make build-compressors-android
       
+      - name: Build compressors for Windows
+        run: make build-compressors-win
+
       - name: Build all distributions
         run: make clean && make dist && mv cfx cfx-linux
       
