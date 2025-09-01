@@ -2,8 +2,36 @@
 #include "../../utils/bmp/reader/bmp_reader.h"
 #include "../../utils/json/json.h"
 #include "../../utils/logger/logger.h"
+#include "../../utils/compress/decompress.h"
 #include "../folder_packer/folder_packer.h"
 #include "sodium.h"
+
+void folder_handle (const std::string& save_path, const std::string& reconstructedFilePath, const std::string& original_filename) {
+    Logger::Log(LOG_INFO, "Detected .cfup file, starting unpacking...");
+    Logger::Log(LOG_DEBUG, save_path + " " + reconstructedFilePath + " " + original_filename);
+    std::string unpackedFolder = (std::filesystem::path(save_path) / std::filesystem::path(original_filename).stem()).string();
+
+    if (!unpack_packed_file(reconstructedFilePath, unpackedFolder)) {
+        Logger::Log(LOG_ERROR, "Failed to unpack the .cfup file: " + reconstructedFilePath);
+    } else {
+        Logger::Log(LOG_INFO, "Unpacking completed successfully at: " + unpackedFolder);
+    }
+}
+
+void compress_handle(const std::string& save_path, const std::string& reconstructedFilePath, const std::string& original_filename) {
+    Logger::Log(LOG_INFO, "Detected .cfmp file, starting decompression...");
+    std::string decompressedFilePath = reconstructedFilePath.substr(0, reconstructedFilePath.size() - 5);
+    if (decompressFile(reconstructedFilePath, decompressedFilePath)) {
+        Logger::Log(LOG_INFO, "Decompression completed: " + decompressedFilePath);
+    } else {
+        Logger::Log(LOG_ERROR, "Decompression failed for: " + reconstructedFilePath);
+    }
+    if (decompressedFilePath.size() > 5 && 
+        decompressedFilePath.compare(decompressedFilePath.size() - 5, 5, ".cfup") == 0) {
+        Logger::Log(LOG_DEBUG, save_path + " " + decompressedFilePath + " " + std::filesystem::path(decompressedFilePath).filename().string());
+        folder_handle(save_path, decompressedFilePath, std::filesystem::path(decompressedFilePath).filename().string());
+    }
+}
 static std::string deriveKeyBlake2b(const std::string& password) {
     unsigned char out[32];
     crypto_generichash(out, sizeof out,
@@ -78,14 +106,7 @@ void create_file(const std::string& bmp_file_path, const std::string& save_path,
 
                 Logger::Log(LOG_INFO, "Original file reconstructed successfully.");
                 if (original_filename.size() > 5 && original_filename.compare(original_filename.size() - 5, 5, ".cfup") == 0) {
-                    Logger::Log(LOG_INFO, "Detected .cfup file, starting unpacking...");
-                    std::string unpackedFolder = (std::filesystem::path(save_path) / std::filesystem::path(original_filename).stem()).string();
-
-                    if (!unpack_packed_file(reconstructedFilePath, unpackedFolder)) {
-                        Logger::Log(LOG_ERROR, "Failed to unpack the .cfup file: " + reconstructedFilePath);
-                    } else {
-                        Logger::Log(LOG_INFO, "Unpacking completed successfully at: " + unpackedFolder);
-                    }
+                    folder_handle(save_path, reconstructedFilePath, original_filename);
                 }
                 return;
             }
@@ -111,18 +132,14 @@ void create_file(const std::string& bmp_file_path, const std::string& save_path,
     Logger::Log(LOG_DEBUG, "Binary Length: " + std::to_string(binary_length));
 
     std::string encryptionKey = data.encryption_key;
-
+    std::string decompressedFilePath = "";
     readBMP(bmp_file_path, reconstructedFilePath, binary_length / 8, encryptionKey);
 
     Logger::Log(LOG_INFO, "Original file reconstructed successfully.");
+    if (original_filename.size() > 5 && original_filename.compare(original_filename.size() - 5, 5, ".cfmp") == 0) {
+        compress_handle(save_path, reconstructedFilePath, original_filename);
+    }
     if (original_filename.size() > 5 && original_filename.compare(original_filename.size() - 5, 5, ".cfup") == 0) {
-        Logger::Log(LOG_INFO, "Detected .cfup file, starting unpacking...");
-        std::string unpackedFolder = (std::filesystem::path(save_path) / std::filesystem::path(original_filename).stem()).string();
-
-        if (!unpack_packed_file(reconstructedFilePath, unpackedFolder)) {
-            Logger::Log(LOG_ERROR, "Failed to unpack the .cfup file: " + reconstructedFilePath);
-        } else {
-            Logger::Log(LOG_INFO, "Unpacking completed successfully at: " + unpackedFolder);
-        }
+        folder_handle(save_path, reconstructedFilePath, original_filename);
     }
 }

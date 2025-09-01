@@ -3,6 +3,7 @@
 #include "func/file_creation/create_file.h"
 #include "func/folder_packer/folder_packer.h"
 #include "utils/userinput/user_input.h"
+#include "utils/compress/compress.h"
 #include "version.h"
 #include <filesystem>
 #include <cstdlib>
@@ -19,6 +20,7 @@ int main(int argc, char* argv[]) {
     bool no_encrypt = false;
     bool aio_mode = false;
     bool grayscaleMode = false;
+    std::string compress_arg;
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
         if (arg == "--debug") {
@@ -45,8 +47,7 @@ int main(int argc, char* argv[]) {
             file_flag = true;
             file_path = arg.substr(7);
             input = "file";
-        } 
-        else if (arg == "--version") {
+        } else if (arg == "--version") {
             Logger::Log(LOG_INFO, "CFET-Tools version: " VERSION);
             return 0;
         } else if (arg == "--aio") {
@@ -55,6 +56,9 @@ int main(int argc, char* argv[]) {
         } else if (arg == "--gs") {
             grayscaleMode = true;
             Logger::Log(LOG_INFO, "Grayscale mode enabled.");
+        } else if (arg.substr(0, 11) == "--compress=") {
+            compress_arg = arg.substr(11);
+            Logger::Log(LOG_INFO, "Compression level set to: " + compress_arg);
         } else {
             Logger::Log(LOG_ERROR, "Unknown argument: " + arg);
             return 1;
@@ -87,7 +91,7 @@ int main(int argc, char* argv[]) {
         Logger::Log(LOG_DEBUG, "User input argument was empty.");
         input = inputprompt.ask("Please select a command to proceed (img/file): ");
     }
-
+    
     if (input == "img") {
         if (file_path.empty()) {
             file_path = inputprompt.ask("Please enter the file or folder to be encoded path: ");
@@ -118,10 +122,21 @@ int main(int argc, char* argv[]) {
             Logger::Log(LOG_ERROR, "Input path is not a file or folder.");
             return 1;
         }
-
+        if (!compress_arg.empty()) {
+            std::filesystem::path encodePath(path_to_encode);
+            std::string compressedFilename = encodePath.filename().string() + ".cfmp";
+            int compress_level = std::stoi(compress_arg);
+            Logger::Log(LOG_DEBUG, "Compressing");
+            compressFile(path_to_encode, save_path + "/" + compressedFilename, compress_level);
+            if (std::filesystem::is_directory(inputPath)) {
+                Logger::Log(LOG_INFO, "Removing temporary packed folder: " + path_to_encode);
+                std::filesystem::remove_all(path_to_encode);
+            }
+            path_to_encode = save_path + "/" + compressedFilename;
+        }
         create_img(path_to_encode, save_path, no_encrypt, aio_mode, grayscaleMode);
 
-        if (std::filesystem::is_directory(inputPath)) {
+        if (std::filesystem::is_directory(inputPath) || !compress_arg.empty()) {
             std::filesystem::remove(path_to_encode);
             Logger::Log(LOG_DEBUG, "Removed temporary packed file: " + path_to_encode);
         }

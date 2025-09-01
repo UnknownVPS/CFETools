@@ -13,8 +13,8 @@ LIBSODIUM_WIN_INCLUDE = $(LIBSODIUM_WIN_ROOT)/include
 LIBSODIUM_WIN_LIB = $(LIBSODIUM_WIN_ROOT)/lib
 
 # === Compiler flags ===
-COMPILE_FLAGS = -Wall -std=c++17 -O3 -pthread
-LINK_FLAGS = -lsodium -static-libstdc++ -pthread
+COMPILE_FLAGS = -Wall -std=c++17 -O3 -pthread -DUSE_LZ4 -DUSE_ZSTD -DUSE_LIBLZMA
+LINK_FLAGS = -lsodium -static-libstdc++ -pthread  -llz4 -lzstd -llzma
 ANDROID_COMPILE_FLAGS = $(COMPILE_FLAGS) -I$(LIBSODIUM_INCLUDE)
 ANDROID_LINK_FLAGS = -L$(LIBSODIUM_LIB) -lsodium -static-libstdc++
 WIN_COMPILE_FLAGS = $(COMPILE_FLAGS) -I$(LIBSODIUM_WIN_INCLUDE) --static
@@ -35,6 +35,8 @@ SRCS = utils/userinput/user_input.cpp \
        func/file_creation/create_file.cpp \
        utils/logger/logger.cpp \
        func/folder_packer/folder_packer.cpp \
+       utils/compress/compress.cpp \
+       utils/compress/decompress.cpp \
        main.cpp
 
 OBJS = $(SRCS:.cpp=.o)
