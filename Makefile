@@ -29,9 +29,7 @@ VERSION_FILE = version.h
 # === Source and object files ===
 SRCS = utils/userinput/user_input.cpp \
        utils/bmp/writer/bmp_writer.cpp \
-       utils/bmp/writer/bmp_writer_noenc.cpp \
        utils/bmp/reader/bmp_reader.cpp \
-       utils/bmp/reader/bmp_reader_noenc.cpp \
        utils/json/json.cpp \
        func/img_creation/create_img.cpp \
        func/file_creation/create_file.cpp \

@@ -1,12 +1,19 @@
 #include "create_file.h"
 #include "../../utils/bmp/reader/bmp_reader.h"
-#include "../../utils/bmp/reader/bmp_reader_noenc.h"
 #include "../../utils/json/json.h"
 #include "../../utils/logger/logger.h"
 #include "../folder_packer/folder_packer.h"
+#include "sodium.h"
+static std::string deriveKeyBlake2b(const std::string& password) {
+    unsigned char out[32];
+    crypto_generichash(out, sizeof out,
+                       reinterpret_cast<const unsigned char*>(password.data()),
+                       password.size(),
+                       nullptr, 0);
+    return std::string(reinterpret_cast<char*>(out), sizeof out);
+}
 
 void create_file(const std::string& bmp_file_path, const std::string& save_path, bool /*aio_mode*/) {
-    bool extracted = false;
     std::string original_filename;
     std::string reconstructedFilePath;
     uint64_t extracted_length = 0;
@@ -19,7 +26,18 @@ void create_file(const std::string& bmp_file_path, const std::string& save_path,
             BMPInfoHeader infoHeader;
             file.read(reinterpret_cast<char*>(&fileHeader), sizeof(fileHeader));
             file.read(reinterpret_cast<char*>(&infoHeader), sizeof(infoHeader));
-            file.seekg(sizeof(unsigned int) * 2, std::ios::cur); // skip color table
+
+            // FIXED: Skip color table based on bit depth
+            if (infoHeader.bit_count == 8) {
+                // 8-bit grayscale has 256 color entries (1024 bytes)
+                file.seekg(sizeof(unsigned int) * 256, std::ios::cur);
+            } else if (infoHeader.bit_count == 1) {
+                // 1-bit monochrome has 2 color entries (8 bytes)
+                file.seekg(sizeof(unsigned int) * 2, std::ios::cur);
+            } else {
+                Logger::Log(LOG_ERROR, "Unsupported bit depth: " + std::to_string(infoHeader.bit_count));
+                return;
+            }
 
             uint64_t aio_bin_len = 0;
             uint16_t aio_fname_len = 0;
@@ -31,29 +49,47 @@ void create_file(const std::string& bmp_file_path, const std::string& save_path,
                 original_filename = aio_fname;
                 extracted_length = aio_bin_len / 8;
                 reconstructedFilePath = save_path + "/" + original_filename;
-                extracted = true;
+
+                // Read encryptedFlag (1 = encrypted, 0 = not encrypted)
+                uint8_t encryptedFlag = 0;
+                file.read(reinterpret_cast<char*>(&encryptedFlag), sizeof(encryptedFlag));
+
+                std::string password;
+                std::string encryptionKey;
+                if (encryptedFlag == 1) {
+                    std::cout << "This file is encrypted. Please enter the password: ";
+                    std::getline(std::cin, password);
+                    // Derive a 32-byte key with BLAKE2b
+                    encryptionKey = deriveKeyBlake2b(password);
+
+                    // Best-effort wipe of plaintext password from memory
+                    if (!password.empty()) {
+                        sodium_memzero(password.data(), password.size());
+                    }
+                }
+
+                Logger::Log(LOG_INFO, "AIO header detected in BMP. Reconstructing file: " + original_filename);
+                Logger::Log(LOG_DEBUG, "Extracted Length: " + std::to_string(extracted_length));
+                Logger::Log(LOG_DEBUG, "Extracted Filename: " + original_filename);
+                Logger::Log(LOG_DEBUG, "Encryption Flag: " + std::string(encryptedFlag ? "Encrypted" : "Not Encrypted"));
+                Logger::Log(LOG_DEBUG, "Bit Depth: " + std::to_string(infoHeader.bit_count) + "-bit");
+
+                readBMP(bmp_file_path, reconstructedFilePath, extracted_length, encryptionKey);
+
+                Logger::Log(LOG_INFO, "Original file reconstructed successfully.");
+                if (original_filename.size() > 5 && original_filename.compare(original_filename.size() - 5, 5, ".cfup") == 0) {
+                    Logger::Log(LOG_INFO, "Detected .cfup file, starting unpacking...");
+                    std::string unpackedFolder = (std::filesystem::path(save_path) / std::filesystem::path(original_filename).stem()).string();
+
+                    if (!unpack_packed_file(reconstructedFilePath, unpackedFolder)) {
+                        Logger::Log(LOG_ERROR, "Failed to unpack the .cfup file: " + reconstructedFilePath);
+                    } else {
+                        Logger::Log(LOG_INFO, "Unpacking completed successfully at: " + unpackedFolder);
+                    }
+                }
+                return;
             }
         }
-    }
-
-    if (extracted) {
-        Logger::Log(LOG_INFO, "AIO header detected in BMP. Reconstructing file: " + original_filename);
-        Logger::Log(LOG_DEBUG, "Extracted Length: " + std::to_string(extracted_length));
-        Logger::Log(LOG_DEBUG, "Extracted Filename: " + original_filename);
-        readBMPNoEncrypt(bmp_file_path, reconstructedFilePath, extracted_length);
-
-        Logger::Log(LOG_INFO, "Original file reconstructed successfully.");
-        if (original_filename.size() > 5 && original_filename.compare(original_filename.size() - 5, 5, ".cfup") == 0) {
-            Logger::Log(LOG_INFO, "Detected .cfup file, starting unpacking...");
-            std::string unpackedFolder = (std::filesystem::path(save_path) / std::filesystem::path(original_filename).stem()).string();
-
-            if (!unpack_packed_file(reconstructedFilePath, unpackedFolder)) {
-                Logger::Log(LOG_ERROR, "Failed to unpack the .cfup file: " + reconstructedFilePath);
-            } else {
-                Logger::Log(LOG_INFO, "Unpacking completed successfully at: " + unpackedFolder);
-            }
-        }
-        return;
     }
 
     // Fallback to .mtd
@@ -76,11 +112,7 @@ void create_file(const std::string& bmp_file_path, const std::string& save_path,
 
     std::string encryptionKey = data.encryption_key;
 
-    if (encryptionKey.empty()) {
-        readBMPNoEncrypt(bmp_file_path, reconstructedFilePath, binary_length / 8);
-    } else {
-        readBMP(bmp_file_path, reconstructedFilePath, binary_length / 8, encryptionKey);
-    }
+    readBMP(bmp_file_path, reconstructedFilePath, binary_length / 8, encryptionKey);
 
     Logger::Log(LOG_INFO, "Original file reconstructed successfully.");
     if (original_filename.size() > 5 && original_filename.compare(original_filename.size() - 5, 5, ".cfup") == 0) {
