@@ -170,7 +170,7 @@ int main(int argc, char* argv[]) {
             std::string compressedFilename = encodePath.filename().string() + ".cfmp";
             int compress_level = std::stoi(compress_arg);
             Logger::Log(LOG_DEBUG, "Compressing");
-            compressFile(path_to_encode, std::filesystem::path(save_path) / compressedFilename, compress_level);
+            compressFile(path_to_encode, (std::filesystem::path(save_path) / compressedFilename).string(), compress_level);
             if (std::filesystem::is_directory(inputPath)) {
                 Logger::Log(LOG_INFO, "Removing temporary packed folder: " + path_to_encode);
                 std::filesystem::remove_all(path_to_encode);
