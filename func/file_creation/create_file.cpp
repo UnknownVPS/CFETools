@@ -4,6 +4,7 @@
 #include "../../utils/logger/logger.h"
 #include "../../utils/compress/decompress.h"
 #include "../folder_packer/folder_packer.h"
+#include "../../utils/userinput/user_input.h"
 #include "sodium.h"
 
 void folder_handle (const std::string& save_path, const std::string& reconstructedFilePath, const std::string& original_filename) {
@@ -41,7 +42,7 @@ static std::string deriveKeyBlake2b(const std::string& password) {
     return std::string(reinterpret_cast<char*>(out), sizeof out);
 }
 
-void create_file(const std::string& bmp_file_path, const std::string& save_path, bool /*aio_mode*/) {
+void create_file(const std::string& bmp_file_path, const std::string& save_path) {
     std::string original_filename;
     std::string reconstructedFilePath;
     uint64_t extracted_length = 0;
@@ -85,8 +86,9 @@ void create_file(const std::string& bmp_file_path, const std::string& save_path,
                 std::string password;
                 std::string encryptionKey;
                 if (encryptedFlag == 1) {
-                    std::cout << "This file is encrypted. Please enter the password: ";
-                    std::getline(std::cin, password);
+                    Logger::Log(LOG_INFO, "This file is encrypted.");
+                    Input inputprompt;
+                    password = inputprompt.ask("Please enter a password: ");
                     // Derive a 32-byte key with BLAKE2b
                     encryptionKey = deriveKeyBlake2b(password);
 

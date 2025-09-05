@@ -2,10 +2,11 @@
 #include <iostream>
 
 LogLevel Logger::currentLevel = LOG_INFO;
-extern bool isDebugMode;
+bool isDebugMode;
 
 void Logger::SetLevel(LogLevel level) {
     currentLevel = level;
+    if (level == LOG_DEBUG) {isDebugMode = true;}
 }
 
 void Logger::Log(LogLevel level, const std::string& message) {

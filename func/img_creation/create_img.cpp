@@ -2,6 +2,7 @@
 #include "../../utils/bmp/writer/bmp_writer.h"
 #include "../../utils/json/json.h"
 #include "../../utils/logger/logger.h"
+#include "../../utils/userinput/user_input.h"
 #include <random>
 #include <sstream>
 #include <iomanip>
@@ -59,8 +60,8 @@ void create_img(const std::string& file_path, const std::string& save_path,
     if (aio_mode && !no_encrypt) {
         Logger::Log(LOG_INFO, "AIO Mode with Encryption requires a password");
         std::string password;
-        std::cout << "Enter password: ";
-        std::getline(std::cin, password);
+        Input inputprompt;
+        password = inputprompt.ask("Please enter a password (be aware not recoverable): ");
 
         // Derive a 32-byte key with BLAKE2b
         encryptionKey = deriveKeyBlake2b(password);
