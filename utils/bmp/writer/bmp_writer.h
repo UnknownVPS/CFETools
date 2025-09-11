@@ -8,6 +8,15 @@
 #include <bitset>
 #include <filesystem>
 #include <cstdint>
+#include <random>
+#include <ctime>
+#include <vector>
+#include <algorithm>
+#include <thread>
+#include <mutex>
+#include <condition_variable>
+#include <queue>
+#include <atomic>
 
 #pragma pack(push, 1)
 struct BMPFileHeader {
@@ -33,6 +42,7 @@ struct BMPInfoHeader {
 };
 #pragma pack(pop)
 
-void writeBMP(const std::string& filename, const std::string& inputFilename);
-
-#endif  // BMP_WRITER_H
+// Full-featured function with all options
+void writeBMP(const std::string& filename, const std::string& inputFilename, const std::string& encryptionKey, 
+              bool noEncryption, bool grayscaleMode, bool aioMode);
+#endif // BMP_WRITER_H
