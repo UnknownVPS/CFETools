@@ -1,64 +1,77 @@
 
+# Nutox
 
-# PixelBin: Secure File Transfer System Overview
-
-**PixelBin** is our secure file transfer application designed for the efficient transfer of large-scale files. Utilizing a proprietary algorithm that is uniquely developed, PixelBin achieves impressive performance metrics on GitHub Codespaces servers:
-
-- **Read Speed**: 3.5 GB/minute  
-- **Write Speed**: 2 GB/minute  
-
-This innovative approach ensures rapid and secure transmission of data, making PixelBin suitable for applications requiring high-speed file transfers without compromising security.
+A compression and file encoding tool written in C++ for speed and security.
 
 
-## Badges
-
-![Static Badge](https://img.shields.io/badge/UnknownVPS-Project-orange)
-
-
-![Static Badge](https://img.shields.io/badge/Status-Development-red)
-
+<img src="https://files.unknownvps.eu.org/get/file/Nutox.png" alt="Logo" width=50%/>
 
 
 ## Features
 
-- Works on Linux, Windows and Android(Termux)
-- Extremely Fast (Your Disk Speed is the limit)
-- Constant bug fixing updates
-- Capable of converting files of hundredss of GBs
+- Compression and Decompression
+- Encryption and Decryption
+- Fast
+- Cross platform
+- Folders are supported
+
+
+## Graphs (Performance)
+
+<img src="https://files.unknownvps.eu.org/get/file/cfx_encode_decode_times.png" alt="Response Time Graph" width=50% height=200 />
+
+<img src="https://files.unknownvps.eu.org/get/file/cfx_throughput_comparison.png" alt="Throughput Graph" width=50% height=200 />
+
+<img src="https://files.unknownvps.eu.org/get/file/cfx_performance_all_metrics.png" alt="Full graph Graph" width=50% height=200 />
 
 
 ## Installation
 
-Installation is not required. Simply download the latest release from the [Releases](https://github.com/UnknownPersonOG/Nutox/Releases)
+Download the file for your platform from the [latest release](https://github.com/unknownpersonog/Nutox/releases/latest)
 
-Simply run the file on your operating system.
+Make the file executable as per your platform.
 
+Verify if it's working with:
 
-
-
-
-## Usage/Examples
-
-Linux (Image Creation)
+- Linux:
 ```bash
-cfx --img=/path/to/your/file
+  ./cfx -v
+```
+- Windows:
+```powershell
+  .\\cfx -v
 ```
 
-Windows (File Creation)
-```powershell
-.\cfx --file=path/to/encoded/image
-``` 
-Windows uses a different path system than one shown above ensure that while running. 
+## Usage
+### Encode a file
+```bash
+./cfx --file path/to/file
+```
+ 
+Encode a file without encryption and a single file (all-in-one mode)
+```bash
+./cfx -f path/to/file -ne -a
+```
+-f is shorthand for --file, -ne for --no-encrypt and -a for --aio
 
-- **Note: The "file" mode by-default tries to find the metadata in same directory as the provided image.**
+Optionally you can enabled 8-Bit mode using a `-gs` flag
+### Decode a encoded image
+```bash
+./cfx -i path/to/image
+```
+It will automatically detect the required from the image
+
+## License
+
+[GNU GPLv3](https://choosealicense.com/licenses/gpl-3.0/)
+
+
 ## Authors
 
-- [@UnknownVPS](https://www.github.com/UnknownVPS) & Team
+- [@unknownpersonog](https://www.github.com/unknownpersonog) as a part of [UnknownVPS](https://github.com/UnknownVPS) Team
 
 
-## Roadmap
+## Support
 
-- Compression
-
-- Fine tune this system and its security 
+For support, email admin@unknownvps.eu.org or join our Discord server.
 
