@@ -90,7 +90,7 @@ int main(int argc, char* argv[]) {
     std::string compress_arg = parser.getValue("compress", "c", "");
     std::string img_input = parser.getValue("img", "i", "");
     std::string file_input = parser.getValue("file", "f", "");
-    Logger::Log(LOG_INFO, std::string("Following modes are enabled: ") + (aio ? "AIO " : "") + (grayscale ? "Grayscale " : "1-bit ") + (no_encrypt ? "Unencrypted " : "Encrypted "));
+    Logger::Log(LOG_INFO, std::string("Following modes are enabled: ") + (aio ? "AIO " : "") + (grayscale ? "8-bit " : "1-bit ") + (no_encrypt ? "Unencrypted " : "Encrypted "));
     
     // System checks
     Logger::Log(LOG_DEBUG, "Checking system type");
@@ -103,7 +103,7 @@ int main(int argc, char* argv[]) {
     #endif
 
     // Directory checks
-    Logger::Log(LOG_DEBUG, "Checking CFET-Tools directory status: ");
+    Logger::Log(LOG_DEBUG, "Checking CFET-Tools directory status... ");
     if (home != nullptr) {
         std::filesystem::path tool_dir(home);
         tool_dir /= "CFET-Tools";
