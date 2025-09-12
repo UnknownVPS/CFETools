@@ -1,7 +1,7 @@
 name: Build Multi-Platform Binaries
 on:
   push:
-    branches: [ main, dev ]
+    branches: [ main, gears ]
   pull_request:
     branches: [ main ]
   workflow_dispatch:
@@ -79,17 +79,15 @@ jobs:
       - name: Set executable permissions
         run: chmod +x cfx-linux cfx-android
       
-      - name: Create GitHub Release
-        uses: marvinpinto/action-automatic-releases@latest
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GIT_TOKEN }}
         with:
-          repo_token: ${{ secrets.GIT_TOKEN }}
-          automatic_release_tag: ${{ needs.build.outputs.version }}
-          prerelease: false
-          title: "Multi-Platform Build ${{ needs.build.outputs.version }}"
-          files: |
-            cfx-linux
-            cfx-windows.exe
-            cfx-android
+          tag_name: ${{ needs.build.outputs.version }}
+          release_name: "Multi-Platform Build ${{ needs.build.outputs.version }}"
+          prerelease: ${{ github.ref_name != 'main' }}
           body: |
             This release includes freshly built binaries for the following platforms:
             - **Linux** (`cfx-linux`)
@@ -98,3 +96,33 @@ jobs:
             
             Built from the latest commit to `${{ github.ref_name }}` using `make dist`.
             Version: ${{ needs.build.outputs.version }}
+
+      - name: Upload Linux binary
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GIT_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./cfx-linux
+          asset_name: cfx-linux
+          asset_content_type: application/octet-stream
+
+      - name: Upload Windows binary
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GIT_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./cfx-windows.exe
+          asset_name: cfx-windows.exe
+          asset_content_type: application/octet-stream
+
+      - name: Upload Android binary
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GIT_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./cfx-android
+          asset_name: cfx-android
+          asset_content_type: application/octet-stream

@@ -22,8 +22,6 @@ A compression and file encoding tool written in C++ for speed and security.
 
 <img src="https://files.unknownvps.eu.org/get/file/cfx_throughput_comparison.png" alt="Throughput Graph" width=75% height=300 />
 
-<img src="https://files.unknownvps.eu.org/get/file/cfx_performance_all_metrics.png" alt="Full graph Graph" width=75% height=300 />
-
 
 ## Installation
 
