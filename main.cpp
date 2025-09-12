@@ -149,7 +149,7 @@ int main(int argc, char* argv[]) {
 
         if (std::filesystem::is_directory(inputPath)) {
             std::string packedFileName = inputPath.filename().string() + ".cfup";
-            std::filesystem::path packedFilePath = inputPath.parent_path() / packedFileName;
+            std::filesystem::path packedFilePath = std::filesystem::path(save_path) / packedFileName;
 
             Logger::Log(LOG_INFO, "Input is a folder. Packing it into: " + packedFilePath.string());
 
