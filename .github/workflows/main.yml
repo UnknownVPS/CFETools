@@ -94,7 +94,7 @@ jobs:
             - **Windows** (`cfx-windows.exe`)
             - **Android** (`cfx-android`)
             
-            Built from the latest commit to `${{ github.ref_name }}` using `make dist`.
+            Built from the [${{ github.sha }}](https://github.com/${{ github.repository }}/commit/${{ github.sha }}) commit to `${{ github.ref_name }}` using `make dist`.
             Version: ${{ needs.build.outputs.version }}
 
       - name: Upload Linux binary
