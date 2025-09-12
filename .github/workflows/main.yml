@@ -68,7 +68,7 @@ jobs:
   create-release:
     needs: [build]
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev'
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/gears'
     steps:
       - name: Download all artifacts
         uses: actions/download-artifact@v4
