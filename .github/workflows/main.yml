@@ -51,7 +51,7 @@ jobs:
       - name: Generate version
         id: version
         run: |
-          VERSION="$(cfx-linux -v)"
+          VERSION="$(./cfx-linux -v)"
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "Generated version: $VERSION"
       
