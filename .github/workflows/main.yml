@@ -48,12 +48,12 @@ jobs:
       - name: Build all distributions
         run: make clean && make dist && mv cfx cfx-linux
       
-      - name: Generate version
+      - name: Extract version from Version.h
         id: version
         run: |
-          VERSION="$(./cfx-linux -v)"
+          VERSION=v$(grep -E '^#define VERSION "' version.h | cut -d'"' -f2)
           echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "Generated version: $VERSION"
+          echo "Using version from version.h: $VERSION"
       
       - name: Upload release artifacts
         uses: actions/upload-artifact@v4
