@@ -156,7 +156,7 @@ int main(int argc, char* argv[]) {
 
             Logger::Log(LOG_INFO, "Input is a folder. Packing it into: " + packedFilePath.string());
 
-            if (!pack_folder(file_input, packedFilePath.string())) {
+            if (!pack_folder_toc(file_input, packedFilePath.string())) {
                 Logger::Log(LOG_ERROR, "Failed to pack folder.");
                 return 1;
             }

@@ -14,7 +14,7 @@ void folder_handle (const std::string& save_path, const std::string& reconstruct
     Logger::Log(LOG_DEBUG, save_path + " " + reconstructedFilePath + " " + original_filename);
     std::string unpackedFolder = (std::filesystem::path(save_path) / std::filesystem::path(original_filename).stem()).string();
 
-    if (!unpack_packed_file(reconstructedFilePath, unpackedFolder)) {
+    if (!unpack_packed_file_toc(reconstructedFilePath, unpackedFolder)) {
         Logger::Log(LOG_ERROR, "Failed to unpack the .cfup file: " + reconstructedFilePath);
     } else {
         Logger::Log(LOG_INFO, "Unpacking completed successfully at: " + unpackedFolder);
