@@ -1,4 +1,4 @@
 cfx*
 .vscode
 *.o
-version.h
+*.a

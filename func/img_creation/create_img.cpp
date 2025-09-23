@@ -3,6 +3,7 @@
 #include "../../utils/json/json.h"
 #include "../../utils/logger/logger.h"
 #include "../../utils/userinput/user_input.h"
+#include "../../globals.h"
 #include <random>
 #include <sstream>
 #include <iomanip>
@@ -25,8 +26,7 @@ std::string generateRandomKey(size_t length) {
     return std::string(key.begin(), key.end());
 }
 
-void create_img(const std::string& file_path, const std::string& save_path,
-                bool no_encrypt, bool aio_mode, bool grayscaleMode) {
+void create_img(const std::string& file_path) {
     if (sodium_init() < 0) {
         Logger::Log(LOG_ERROR, "libsodium initialization failed");
         return;
@@ -52,12 +52,12 @@ void create_img(const std::string& file_path, const std::string& save_path,
     }
     data.encryption_key = encryptionKey;
 
-    if (!aio_mode) {
+    if (!aio) {
         Logger::Log(LOG_DEBUG, "Writing JSON file.");
         write_json(save_path + '/' + file_name + ".mtd", data);
     }
 
-    if (aio_mode && !no_encrypt) {
+    if (aio && !no_encrypt) {
         Logger::Log(LOG_INFO, "AIO Mode with Encryption requires a password");
         std::string password;
         Input inputprompt;
@@ -72,6 +72,6 @@ void create_img(const std::string& file_path, const std::string& save_path,
         }
     }
 
-    writeBMP(save_path + "/" + file_name + ".bmp", file_path, encryptionKey, no_encrypt, grayscaleMode, aio_mode);
+    writeBMP(save_path + "/" + file_name + ".bmp", file_path, encryptionKey);
     Logger::Log(LOG_INFO, "Image written successfully!");
 }

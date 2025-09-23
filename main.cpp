@@ -9,7 +9,15 @@
 #include "utils/userinput/user_input.h"
 #include "utils/compress/compress.h"
 #include "version.h"
+#include "globals.h"
 #include <filesystem>
+
+bool no_encrypt = false;
+bool aio = false; 
+bool grayscale = false;
+bool isCompressed = false;
+bool isPacked = false;
+std::string save_path = "";
 
 class ArgParser {
 private:
@@ -66,11 +74,7 @@ public:
 };
 
 int main(int argc, char* argv[]) {
-    bool no_encrypt;
-    bool aio;
-    bool grayscale;
     const char* home;
-    std::string save_path;
 
     // Parse the args
     ArgParser parser(argc, argv);
@@ -91,7 +95,6 @@ int main(int argc, char* argv[]) {
     std::string img_input = parser.getValue("img", "i", "");
     std::string file_input = parser.getValue("file", "f", "");
     Logger::Log(LOG_INFO, std::string("Following modes are enabled: ") + (aio ? "AIO " : "") + (grayscale ? "8-bit " : "1-bit ") + (no_encrypt ? "Unencrypted " : "Encrypted "));
-    
     // System checks
     Logger::Log(LOG_DEBUG, "Checking system type");
     #ifdef _WIN32
@@ -139,7 +142,7 @@ int main(int argc, char* argv[]) {
             Logger::Log(LOG_ERROR, "Invalid input. Path is invalid. Please recheck.");
             return 2;
         }
-        create_file(img_input, save_path);
+        create_file(img_input);
     }
 
     if (!file_input.empty()) {
@@ -157,7 +160,7 @@ int main(int argc, char* argv[]) {
                 Logger::Log(LOG_ERROR, "Failed to pack folder.");
                 return 1;
             }
-
+            isPacked = true;
             path_to_encode = packedFilePath.string();
         } else if (std::filesystem::is_regular_file(inputPath)) {
             path_to_encode = file_input;
@@ -175,9 +178,10 @@ int main(int argc, char* argv[]) {
                 Logger::Log(LOG_INFO, "Removing temporary packed folder: " + path_to_encode);
                 std::filesystem::remove_all(path_to_encode);
             }
+            isCompressed = true;
             path_to_encode = (std::filesystem::path(save_path) / compressedFilename).string();
         }
-        create_img(path_to_encode, save_path, no_encrypt, aio, grayscale);
+        create_img(path_to_encode);
 
         if (std::filesystem::is_directory(inputPath) || !compress_arg.empty()) {
             std::filesystem::remove(path_to_encode);

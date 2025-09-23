@@ -51,7 +51,7 @@ ZSTD_WIN_LIB = $(ZSTD_WIN_ROOT)/lib
 XZ_WIN_LIB = $(XZ_WIN_ROOT)/lib
 
 # === Compiler flags ===
-COMPILE_FLAGS = -Wall -std=c++17 -O3 -pthread -DUSE_LZ4 -DUSE_ZSTD -DUSE_LIBLZMA
+COMPILE_FLAGS = -Wall -std=c++23 -O3 -pthread -DUSE_LZ4 -DUSE_ZSTD -DUSE_LIBLZMA
 LINK_FLAGS = -lsodium -static-libstdc++ -pthread -llz4 -lzstd -llzma -static
 ANDROID_COMPILE_FLAGS = $(COMPILE_FLAGS) -I$(LIBSODIUM_INCLUDE) -I$(LZ4_ANDROID_INCLUDE) -I$(ZSTD_ANDROID_INCLUDE) -I$(XZ_ANDROID_INCLUDE)
 # Example: static for compressors only, dynamic for system libs
@@ -76,6 +76,7 @@ SRCS = utils/userinput/user_input.cpp \
        func/folder_packer/folder_packer.cpp \
        utils/compress/compress.cpp \
        utils/compress/decompress.cpp \
+	   utils/aio/aio_header.cpp \
        main.cpp
 
 OBJS = $(SRCS:.cpp=.o)
@@ -114,9 +115,9 @@ $(ANDROID_TARGET): $(ANDROID_OBJS)
 	@echo "Compiling $< for Android"
 	$(ANDROID_CXX) -c $< -o $@ $(ANDROID_COMPILE_FLAGS)
 
-# === Dist build with versioning ===
-dist: $(VERSION_FILE)
-	@echo "Building all targets with versioning..."
+# === Dist build ===
+dist:
+	@echo "Building all targets"
 	$(MAKE) all
 	$(MAKE) windows
 	$(MAKE) android
@@ -260,7 +261,7 @@ install-libsodium-win:
 
 # === Cleanup ===
 clean:
-	rm -f $(TARGET) $(WIN_TARGET) $(ANDROID_TARGET) $(OBJS) $(WIN_OBJS) $(ANDROID_OBJS) $(VERSION_FILE)
+	rm -f $(TARGET) $(WIN_TARGET) $(ANDROID_TARGET) $(OBJS) $(WIN_OBJS) $(ANDROID_OBJS)
 
 clean-all: clean
 	rm -rf libsodium-1.0.20 libsodium-1.0.20.tar.gz libsodium-android libsodium-win \
