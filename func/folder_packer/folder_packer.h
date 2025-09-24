@@ -6,6 +6,6 @@
 #include "../../utils/logger/logger.h"
 namespace fs = std::filesystem;
 
-bool pack_folder_toc(const std::string& folderPath, const std::string& packedFilePath);
+bool pack_folder(const std::string& folderPath, const std::string& packedFilePath);
 
-bool unpack_packed_file_toc(const std::string& packedFilePath, const std::string& outputFolderPath);
+bool unpack_packed_file(const std::string& packedFilePath, const std::string& outputFolderPath);

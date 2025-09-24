@@ -73,64 +73,66 @@ public:
     }
 };
 
+#include <chrono>  // for timing
+
+// Utility function to log duration
+template <typename Func>
+auto logDuration(const std::string& label, Func&& func) {
+    auto start = std::chrono::steady_clock::now();
+    auto result = func();  // call the function
+    auto end = std::chrono::steady_clock::now();
+    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
+    Logger::Log(LOG_INFO, label + " completed in " + std::to_string(ms) + " ms");
+    return result; // return the function’s result if any
+}
+
 int main(int argc, char* argv[]) {
     const char* home;
-
-    // Parse the args
     ArgParser parser(argc, argv);
+
     parser.hasFlag("debug", "d") ? Logger::SetLevel(LOG_DEBUG) : Logger::SetLevel(LOG_INFO);
     Logger::Log(LOG_DEBUG, "Debug mode enabled ");
     no_encrypt = parser.hasFlag("no-encrypt", "ne");
-    Logger::Log(LOG_DEBUG, "Encryption: " + std::to_string(!no_encrypt));
     aio = parser.hasFlag("aio", "a");
-    Logger::Log(LOG_DEBUG, "AIO mode: " + std::to_string(aio));
     grayscale = parser.hasFlag("grayscale", "gs");
-    Logger::Log(LOG_DEBUG, "Grayscale mode: " + std::to_string(grayscale));
+
     if (parser.hasFlag("version", "v")) {
         Logger::Log(LOG_INFO, "CFET-Tools version: " VERSION);
         Logger::Log(LOG_INFO, "Author: unknownpersonog");
         return 0;
     }
+
     std::string compress_arg = parser.getValue("compress", "c", "");
     std::string img_input = parser.getValue("img", "i", "");
     std::string file_input = parser.getValue("file", "f", "");
-    Logger::Log(LOG_INFO, std::string("Following modes are enabled: ") + (aio ? "AIO " : "") + (grayscale ? "8-bit " : "1-bit ") + (no_encrypt ? "Unencrypted " : "Encrypted "));
+
     // System checks
-    Logger::Log(LOG_DEBUG, "Checking system type");
     #ifdef _WIN32
-        Logger::Log(LOG_DEBUG, "Detected system: Windows");
         home = std::getenv("USERPROFILE");
     #else
-        Logger::Log(LOG_DEBUG, "Detected system: Unix-like");
         home = std::getenv("HOME");
     #endif
 
-    // Directory checks
-    Logger::Log(LOG_DEBUG, "Checking CFET-Tools directory status... ");
     if (home != nullptr) {
         std::filesystem::path tool_dir(home);
         tool_dir /= "CFET-Tools";
         if (!std::filesystem::exists(tool_dir)) {
-            Logger::Log(LOG_INFO, "Directory does not exist. Creating..");
             std::filesystem::create_directory(tool_dir);
         }
         save_path = tool_dir.string();
-        Logger::Log(LOG_DEBUG, "Currently using directory at " + save_path);
     } else {
         Logger::Log(LOG_ERROR, "Cannot get home directory.");
         return 1;
     }
 
-    // Handlers
     if (img_input.empty() && file_input.empty()) {
-        Logger::Log(LOG_INFO, "img: to convert a decrypt a file");
-        Logger::Log(LOG_INFO, "file: to encrypt a file");
         Input prompt;
         std::string input = prompt.ask("What would you like to do?: ");
         if ((input == "img" || input == "i")) { img_input = prompt.ask("Path to image to be decrypted: "); }
         else if ((input == "file" || input == "f")) { file_input = prompt.ask("Path to file to be encrypted: "); }
-        else {Logger::Log(LOG_ERROR, "Invalid option. Exiting. ");}
+        else { Logger::Log(LOG_ERROR, "Invalid option. Exiting."); }
     }
+
     if (!img_input.empty() && !file_input.empty()) {
         Logger::Log(LOG_ERROR, "Cannot specify both -i/--img and -f/--file");
         return 2;
@@ -139,10 +141,13 @@ int main(int argc, char* argv[]) {
     if (!img_input.empty()) {
         Logger::Log(LOG_INFO, "Processing the input image at: " + img_input);
         if (!std::filesystem::exists(img_input)) {
-            Logger::Log(LOG_ERROR, "Invalid input. Path is invalid. Please recheck.");
+            Logger::Log(LOG_ERROR, "Invalid input. Path is invalid.");
             return 2;
         }
-        create_file(img_input);
+        logDuration("Image extraction", [&]() {
+            create_file(img_input);
+            return 0;
+        });
     }
 
     if (!file_input.empty()) {
@@ -153,10 +158,13 @@ int main(int argc, char* argv[]) {
         if (std::filesystem::is_directory(inputPath)) {
             std::string packedFileName = inputPath.filename().string() + ".cfup";
             std::filesystem::path packedFilePath = std::filesystem::path(save_path) / packedFileName;
-
             Logger::Log(LOG_INFO, "Input is a folder. Packing it into: " + packedFilePath.string());
 
-            if (!pack_folder_toc(file_input, packedFilePath.string())) {
+            bool success = logDuration("Folder packing", [&]() {
+                return pack_folder(file_input, packedFilePath.string());
+            });
+
+            if (!success) {
                 Logger::Log(LOG_ERROR, "Failed to pack folder.");
                 return 1;
             }
@@ -165,27 +173,34 @@ int main(int argc, char* argv[]) {
         } else if (std::filesystem::is_regular_file(inputPath)) {
             path_to_encode = file_input;
         } else {
-            Logger::Log(LOG_ERROR, "Invalid input. Input path is not a file or folder.");
+            Logger::Log(LOG_ERROR, "Invalid input. Not a file or folder.");
             return 2;
         }
+
         if (!compress_arg.empty()) {
             std::filesystem::path encodePath(path_to_encode);
             std::string compressedFilename = encodePath.filename().string() + ".cfmp";
             int compress_level = std::stoi(compress_arg);
-            Logger::Log(LOG_DEBUG, "Compressing");
-            compressFile(path_to_encode, (std::filesystem::path(save_path) / compressedFilename).string(), compress_level);
+
+            logDuration("Compression", [&]() {
+                compressFile(path_to_encode, (std::filesystem::path(save_path) / compressedFilename).string(), compress_level);
+                return 0;
+            });
+
             if (std::filesystem::is_directory(inputPath)) {
-                Logger::Log(LOG_INFO, "Removing temporary packed folder: " + path_to_encode);
                 std::filesystem::remove_all(path_to_encode);
             }
             isCompressed = true;
             path_to_encode = (std::filesystem::path(save_path) / compressedFilename).string();
         }
-        create_img(path_to_encode);
+
+        logDuration("Image creation", [&]() {
+            create_img(path_to_encode);
+            return 0;
+        });
 
         if (std::filesystem::is_directory(inputPath) || !compress_arg.empty()) {
             std::filesystem::remove(path_to_encode);
-            Logger::Log(LOG_DEBUG, "Removed temporary file: " + path_to_encode);
         }
     }
 }
