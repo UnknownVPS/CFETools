@@ -57,7 +57,7 @@ void create_img(const std::string& file_path) {
         write_json(save_path + '/' + file_name + ".mtd", data);
     }
 
-    if (!no_encrypt) {
+    if (!twofile_system && !no_encrypt) {
         Logger::Log(LOG_INFO, "AIO Mode with Encryption requires a password");
         std::string password;
         Input inputprompt;
