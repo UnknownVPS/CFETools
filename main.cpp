@@ -8,15 +8,17 @@
 #include "func/folder_packer/folder_packer.h"
 #include "utils/userinput/user_input.h"
 #include "utils/compress/compress.h"
+#include "utils/hashers/fileHasher.hpp"
 #include "version.h"
 #include "globals.h"
 #include <filesystem>
 
 bool no_encrypt = false;
-bool aio = false; 
+bool twofile_system = false; 
 bool grayscale = false;
 bool isCompressed = false;
 bool isPacked = false;
+bool disableHash = false;
 std::string save_path = "";
 
 class ArgParser {
@@ -74,27 +76,57 @@ public:
 };
 
 int main(int argc, char* argv[]) {
+    Logger::StartTimer("Total Execution");
     const char* home;
 
     // Parse the args
     ArgParser parser(argc, argv);
     parser.hasFlag("debug", "d") ? Logger::SetLevel(LOG_DEBUG) : Logger::SetLevel(LOG_INFO);
-    Logger::Log(LOG_DEBUG, "Debug mode enabled ");
     no_encrypt = parser.hasFlag("no-encrypt", "ne");
-    Logger::Log(LOG_DEBUG, "Encryption: " + std::to_string(!no_encrypt));
-    aio = parser.hasFlag("aio", "a");
-    Logger::Log(LOG_DEBUG, "AIO mode: " + std::to_string(aio));
+    twofile_system = parser.hasFlag("two-file", "2f");
     grayscale = parser.hasFlag("grayscale", "gs");
-    Logger::Log(LOG_DEBUG, "Grayscale mode: " + std::to_string(grayscale));
     if (parser.hasFlag("version", "v")) {
         Logger::Log(LOG_INFO, "CFET-Tools version: " VERSION);
         Logger::Log(LOG_INFO, "Author: unknownpersonog");
         return 0;
     }
+    disableHash = parser.hasFlag("skip-hash", "nh");
+    if (parser.hasFlag("sha256", "sha")) {
+        std::string path = parser.getValue("sha256", "sha", "");
+        if (path.empty()) {
+            Logger::Log(LOG_ERROR, "No file specified for hashing.");
+            return 1;
+        }
+        try {
+            std::string hash = fileHasher::hashFileSHA256(path);
+            Logger::Log(LOG_INFO, "SHA-256 Hash: " + hash);
+        } catch (const std::exception& e) {
+            Logger::Log(LOG_ERROR, std::string("Error hashing file: ") + e.what());
+            return 1;
+        }
+        return 0;
+    }
+    if (parser.hasFlag("crc32", "crc")) {
+        std::string path = parser.getValue("crc32", "crc", "");
+        if (path.empty()) {
+            Logger::Log(LOG_ERROR, "No file specified for CRC32 calculation.");
+            return 1;
+        }
+        try {
+            uint32_t crc = fileHasher::crc32_file(path);
+            std::ostringstream oss;
+            oss << std::hex << std::uppercase << crc;
+            Logger::Log(LOG_INFO, "CRC32: " + oss.str());
+        } catch (const std::exception& e) {
+            Logger::Log(LOG_ERROR, std::string("Error calculating CRC32: ") + e.what());
+            return 1;
+        }
+        return 0;
+    }
     std::string compress_arg = parser.getValue("compress", "c", "");
     std::string img_input = parser.getValue("img", "i", "");
     std::string file_input = parser.getValue("file", "f", "");
-    Logger::Log(LOG_INFO, std::string("Following modes are enabled: ") + (aio ? "AIO " : "") + (grayscale ? "8-bit " : "1-bit ") + (no_encrypt ? "Unencrypted " : "Encrypted "));
+    Logger::Log(LOG_INFO, std::string("Following modes are enabled: ") + (twofile_system ? "2 Filesystem (Discontinued) " : "") + (grayscale ? "8-bit " : "1-bit ") + (no_encrypt ? "Unencrypted " : "Encrypted "));
     // System checks
     Logger::Log(LOG_DEBUG, "Checking system type");
     #ifdef _WIN32
@@ -142,7 +174,9 @@ int main(int argc, char* argv[]) {
             Logger::Log(LOG_ERROR, "Invalid input. Path is invalid. Please recheck.");
             return 2;
         }
+        Logger::StartTimer("Processing image to file");
         create_file(img_input);
+        Logger::EndTimer("Processing image to file", LOG_INFO);
     }
 
     if (!file_input.empty()) {
@@ -155,11 +189,12 @@ int main(int argc, char* argv[]) {
             std::filesystem::path packedFilePath = std::filesystem::path(save_path) / packedFileName;
 
             Logger::Log(LOG_INFO, "Input is a folder. Packing it into: " + packedFilePath.string());
-
+            Logger::StartTimer("Folder packing");
             if (!pack_folder(file_input, packedFilePath.string())) {
                 Logger::Log(LOG_ERROR, "Failed to pack folder.");
                 return 1;
             }
+            Logger::EndTimer("Folder packing", LOG_INFO);
             isPacked = true;
             path_to_encode = packedFilePath.string();
         } else if (std::filesystem::is_regular_file(inputPath)) {
@@ -173,7 +208,9 @@ int main(int argc, char* argv[]) {
             std::string compressedFilename = encodePath.filename().string() + ".cfmp";
             int compress_level = std::stoi(compress_arg);
             Logger::Log(LOG_DEBUG, "Compressing");
+            Logger::StartTimer("File compression");
             compressFile(path_to_encode, (std::filesystem::path(save_path) / compressedFilename).string(), compress_level);
+            Logger::EndTimer("File compression", LOG_INFO);
             if (std::filesystem::is_directory(inputPath)) {
                 Logger::Log(LOG_INFO, "Removing temporary packed folder: " + path_to_encode);
                 std::filesystem::remove_all(path_to_encode);
@@ -181,11 +218,14 @@ int main(int argc, char* argv[]) {
             isCompressed = true;
             path_to_encode = (std::filesystem::path(save_path) / compressedFilename).string();
         }
+        Logger::StartTimer("Encoding file to image");
         create_img(path_to_encode);
-
+        Logger::EndTimer("Encoding file to image", LOG_INFO);
         if (std::filesystem::is_directory(inputPath) || !compress_arg.empty()) {
             std::filesystem::remove(path_to_encode);
             Logger::Log(LOG_DEBUG, "Removed temporary file: " + path_to_encode);
         }
     }
+    Logger::EndTimer("Total Execution", LOG_INFO);
+    return 0;
 }

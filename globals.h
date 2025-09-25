@@ -6,7 +6,8 @@ extern bool isCompressed;
 extern bool isPacked;
 extern bool no_encrypt;
 extern bool grayscale;
-extern bool aio;
+extern bool twofile_system;
+extern bool disableHash;
 extern std::string save_path;
 
 #endif // GLOBALS_H

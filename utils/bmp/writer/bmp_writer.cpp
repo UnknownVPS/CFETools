@@ -14,114 +14,57 @@
 #include "../../../globals.h"
 #include "../../aio/aio_header.h"
 #include "../../../version.h"
-// Option 1: Fixed ChaCha20-Poly1305 with proper nonce handling
-constexpr size_t NONCE_SIZE = crypto_aead_chacha20poly1305_ietf_NPUBBYTES;
-constexpr size_t KEY_SIZE = crypto_aead_chacha20poly1305_ietf_KEYBYTES;
-constexpr size_t MAC_SIZE = crypto_aead_chacha20poly1305_ietf_ABYTES;
-
-void encrypt_chunk_aead_fixed(const uint8_t* input, size_t len, uint8_t* output,
-                              const uint8_t* key, uint64_t nonce_counter) {
-    uint8_t nonce[NONCE_SIZE] = {0};
-    // Properly construct nonce - use counter in little endian format
-    for (int i = 0; i < 8; i++) {
-        nonce[i] = (nonce_counter >> (i * 8)) & 0xFF;
-    }
-    // Last 4 bytes remain zero (or could be a fixed value)
-
-    unsigned long long out_len = 0;
-    crypto_aead_chacha20poly1305_ietf_encrypt(output, &out_len,
-                                              input, len,
-                                              nullptr, 0,
-                                              nullptr, nonce, key);
-}
-
-// Option 2: Simple XSalsa20 stream cipher (simpler, no MAC)
-constexpr size_t XSALSA20_NONCE_SIZE = crypto_stream_xsalsa20_NONCEBYTES;
-constexpr size_t XSALSA20_KEY_SIZE = crypto_stream_xsalsa20_KEYBYTES;
-
-void encrypt_chunk_xsalsa20(const uint8_t* input, size_t len, uint8_t* output,
-                            const uint8_t* key, uint64_t nonce_counter) {
-    uint8_t nonce[XSALSA20_NONCE_SIZE] = {0};
-    memcpy(nonce, &nonce_counter, sizeof(nonce_counter));
-
-    crypto_stream_xsalsa20_xor(output, input, len, nonce, key);
-}
-
-// Option 3: Simple ChaCha20 stream cipher (no authentication)
-constexpr size_t CHACHA20_NONCE_SIZE = crypto_stream_chacha20_ietf_NONCEBYTES;
-constexpr size_t CHACHA20_KEY_SIZE = crypto_stream_chacha20_ietf_KEYBYTES;
-
-void encrypt_chunk_chacha20(const uint8_t* input, size_t len, uint8_t* output,
-                            const uint8_t* key, uint64_t nonce_counter) {
-    uint8_t nonce[CHACHA20_NONCE_SIZE] = {0};
-    // ChaCha20 uses 12-byte nonce
-    for (int i = 0; i < 8; i++) {
-        nonce[i] = (nonce_counter >> (i * 8)) & 0xFF;
-    }
-
-    crypto_stream_chacha20_ietf_xor(output, input, len, nonce, key);
-}
-
+#include "../../hashers/fileHasher.hpp"
+#include "../../../utils/hashers/encryption.hpp"
 
 class PixelGenerator {
 public:
-    PixelGenerator(const std::string& inputFilename, const std::string& keyStr, bool no_encrypt = false) 
+    PixelGenerator(const std::string& inputFilename, const std::string& keyStr, bool no_encrypt = false)
         : inputFile(inputFilename, std::ios::binary), no_encrypt(no_encrypt) {
         if (!no_encrypt) {
-            if (sodium_init() < 0) {
-                throw std::runtime_error("libsodium initialization failed");
-            }
-
-            // Derive a fixed-size key
-            if (keyStr.size() != KEY_SIZE) {
-                crypto_generichash(key, KEY_SIZE, (const unsigned char*)keyStr.data(), keyStr.size(), nullptr, 0);
+            if (sodium_init() < 0) throw std::runtime_error("libsodium init failed");
+            if (keyStr.size() != encryption::CHACHA20_KEY_SIZE) {
+                crypto_generichash(key, encryption::CHACHA20_KEY_SIZE, 
+                                   (const unsigned char*)keyStr.data(), keyStr.size(), nullptr, 0);
             } else {
-                memcpy(key, keyStr.data(), KEY_SIZE);
+                memcpy(key, keyStr.data(), encryption::CHACHA20_KEY_SIZE);
             }
-
-            encrypted.resize(maxBatchSize + MAC_SIZE);  // Add MAC_SIZE for AEAD if needed
+            encrypted.resize(maxBatchSize);
         }
-
-        // Allocate reusable buffer once (max possible batch size, you can set this externally if needed)
         buffer.resize(maxBatchSize);
     }
 
-    // Reuse vector and resize only the *used portion* for output
     std::vector<char> getEncryptedBatch(size_t batchSize, uint64_t nonceCounter) {
         inputFile.read(reinterpret_cast<char*>(buffer.data()), batchSize);
         size_t bytesRead = inputFile.gcount();
         if (bytesRead == 0) return {};
 
         if (no_encrypt) {
-            // No encryption - just return the raw data
             return std::vector<char>(reinterpret_cast<char*>(buffer.data()), 
-                                   reinterpret_cast<char*>(buffer.data()) + bytesRead);
+                                     reinterpret_cast<char*>(buffer.data()) + bytesRead);
         }
 
-        // Option 2: ChaCha20 stream cipher (no MAC)
-        encrypt_chunk_chacha20(buffer.data(), bytesRead, encrypted.data(), key, nonceCounter);
+        encryption::chacha20_xor(buffer.data(), bytesRead, encrypted.data(), key, nonceCounter);
         return std::vector<char>(encrypted.begin(), encrypted.begin() + bytesRead);
     }
 
-    bool isEOF() const {
-        return inputFile.eof();
-    }
+    bool isEOF() const { return inputFile.eof(); }
 
 private:
     std::ifstream inputFile;
-    uint8_t key[KEY_SIZE];
+    uint8_t key[encryption::CHACHA20_KEY_SIZE];
     std::vector<uint8_t> buffer;
     std::vector<uint8_t> encrypted;
-    const size_t maxBatchSize = 1024 * 1024; // Default to 1 MB
+    const size_t maxBatchSize = 1024 * 1024;
     bool no_encrypt;
 };
 
 class PixelWriter {
 public:
     PixelWriter(const std::string& filename, const std::string& inputFilename, int_fast32_t width, int_fast32_t height, 
-                bool grayscale = false, bool aio = false, bool no_encrypt = false)
+                bool grayscale = false, bool twofile_system = false, bool no_encrypt = false)
         : file(filename, std::ios::binary), width(width), height(height), grayscale(grayscale), 
-          aio(aio), inputFilename(inputFilename), no_encrypt(no_encrypt) {
+          twofile_system(twofile_system), inputFilename(inputFilename), no_encrypt(no_encrypt) {
         writeHeaders();
     }
 
@@ -154,7 +97,7 @@ private:
     int_fast32_t height;
     std::streampos dataStartPos;
     bool grayscale;
-    bool aio;
+    bool twofile_system;
     std::string inputFilename;
     bool no_encrypt;
 
@@ -196,7 +139,7 @@ private:
         size_t aioHeaderSize = 0;
         AIOHeaderWriter aioWriter; // Declare outside if block for proper scope
         
-        if (aio) {
+        if (!twofile_system) {
             // Get file size for binary length calculation
             std::ifstream testFile(inputFilename, std::ios::binary | std::ios::ate);
             uint64_t binLen = 0;
@@ -215,6 +158,13 @@ private:
             aioWriter.addString("v", VERSION);                    // Auto-calculates (probably 1 bit)
             aioWriter.addBool("compress", isCompressed);
             aioWriter.addBool("pack", isPacked);
+            std::string hash;
+            if (!disableHash) {
+                Logger::StartTimer("SHA-256 hash calculation");
+                hash = fileHasher::hashFileSHA256(inputFilename);
+                Logger::EndTimer("SHA-256 hash calculation", LOG_INFO);
+            }
+            aioWriter.addString("hash", hash);
             // Get the total size for offset calculation
             aioHeaderSize = aioWriter.getTotalSize();
         }
@@ -242,7 +192,7 @@ private:
         }
 
         // Write AIO header if enabled (aioWriter is already prepared above)
-        if (aio) {
+        if (!twofile_system) {
             aioWriter.writeToStream(file);
         }
 
@@ -311,7 +261,7 @@ void writeBMP(const std::string& filename, const std::string& inputFilename, con
     Logger::Log(LOG_DEBUG, "Encoding and writing file...");
 
     PixelGenerator generator(inputFilename, encryptionKey, no_encrypt);
-    PixelWriter writer(filename, inputFilename, width, height, grayscale, aio, no_encrypt);
+    PixelWriter writer(filename, inputFilename, width, height, grayscale, twofile_system, no_encrypt);
 
     ThreadSafeQueue pixelQueue;
     std::atomic<bool> writerDone(false);

@@ -47,17 +47,17 @@ void create_img(const std::string& file_path) {
     if (no_encrypt) {
         encryptionKey.clear();
     } else {
-        // Default (non-AIO): random 32-byte key written to .mtd for compatibility
+        // Default (AIO): random 32-byte key written to .mtd for compatibility
         encryptionKey = generateRandomKey(32);
     }
     data.encryption_key = encryptionKey;
 
-    if (!aio) {
+    if (twofile_system) {
         Logger::Log(LOG_DEBUG, "Writing JSON file.");
         write_json(save_path + '/' + file_name + ".mtd", data);
     }
 
-    if (aio && !no_encrypt) {
+    if (!no_encrypt) {
         Logger::Log(LOG_INFO, "AIO Mode with Encryption requires a password");
         std::string password;
         Input inputprompt;
