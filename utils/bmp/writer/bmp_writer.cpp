@@ -158,13 +158,13 @@ private:
             aioWriter.addString("v", VERSION);                    // Auto-calculates (probably 1 bit)
             aioWriter.addBool("compress", isCompressed);
             aioWriter.addBool("pack", isPacked);
-            std::string hash;
+            uint64_t hash = 0;
             if (!disableHash) {
-                Logger::StartTimer("SHA-256 hash calculation");
-                hash = fileHasher::hashFileSHA256(inputFilename);
-                Logger::EndTimer("SHA-256 hash calculation", LOG_INFO);
+                Logger::StartTimer("xxHash calculation");
+                hash = fileHasher::xxhash_file(inputFilename);
+                Logger::EndTimer("xxHash calculation", LOG_INFO);
             }
-            aioWriter.addString("hash", hash);
+            aioWriter.addUInt64("hash", hash);
             // Get the total size for offset calculation
             aioHeaderSize = aioWriter.getTotalSize();
         }

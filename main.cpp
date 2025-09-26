@@ -123,6 +123,23 @@ int main(int argc, char* argv[]) {
         }
         return 0;
     }
+
+    if (parser.hasFlag("xxhash", "xxh")) {
+        std::string path = parser.getValue("xxhash", "xxh", "");
+        if (path.empty()) {
+            Logger::Log(LOG_ERROR, "No file specified for hashing.");
+            return 1;
+        }
+        try {
+            uint64_t hash = fileHasher::xxhash_file(path);
+
+            Logger::Log(LOG_INFO, "xxHash64: " + std::to_string(hash));
+        } catch (const std::exception& e) {
+            Logger::Log(LOG_ERROR, std::string("Error hashing file: ") + e.what());
+            return 1;
+        }
+        return 0;
+    }
     std::string compress_arg = parser.getValue("compress", "c", "");
     std::string img_input = parser.getValue("img", "i", "");
     std::string file_input = parser.getValue("file", "f", "");

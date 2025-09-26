@@ -6,6 +6,10 @@
 #include <cstdint>
 #include <sodium.h>
 
+// ---------------- XXHash header-only ----------------
+#define XXH_INLINE_ALL
+#include "xxhash.h"
+
 namespace fileHasher {
 
 // ================= SHA-256 =================
@@ -28,7 +32,6 @@ inline std::string hashFileSHA256(const std::string &path) {
     unsigned char hash[crypto_hash_sha256_BYTES];
     crypto_hash_sha256_final(&state, hash);
 
-    // convert to hex string
     static const char hexmap[] = "0123456789abcdef";
     std::string hex(crypto_hash_sha256_BYTES * 2, ' ');
     for (size_t i = 0; i < crypto_hash_sha256_BYTES; i++) {
@@ -45,17 +48,13 @@ inline uint32_t& crc32Table() {
     if (!initialized) {
         for (uint32_t i = 0; i < 256; i++) {
             uint32_t crc = i;
-            for (int j = 0; j < 8; j++) {
-                if (crc & 1)
-                    crc = (crc >> 1) ^ 0xEDB88320;
-                else
-                    crc >>= 1;
-            }
+            for (int j = 0; j < 8; j++)
+                crc = (crc & 1) ? (crc >> 1) ^ 0xEDB88320 : (crc >> 1);
             table[i] = crc;
         }
         initialized = true;
     }
-    return table[0]; // returns reference to first element (array is static)
+    return table[0];
 }
 
 inline int crc32_file(const std::string& path) {
@@ -65,7 +64,6 @@ inline int crc32_file(const std::string& path) {
 
     uint32_t crc = 0xFFFFFFFF;
     std::vector<char> buf(1024 * 1024); // 1 MB chunks
-
     while (in) {
         in.read(buf.data(), buf.size());
         std::streamsize r = in.gcount();
@@ -75,6 +73,28 @@ inline int crc32_file(const std::string& path) {
         }
     }
     return crc ^ 0xFFFFFFFF;
+}
+
+// ================= XXHASH3 =================
+inline uint64_t xxhash_file(const std::string &path) {
+    std::ifstream in(path, std::ios::binary);
+    if (!in) throw std::runtime_error("File not found");
+
+    XXH3_state_t* state = XXH3_createState();
+    if (!state) throw std::runtime_error("Failed to create xxHash state");
+    XXH3_64bits_reset(state);
+
+    std::vector<char> buf(1024 * 1024); // 1 MB chunks
+    while (in) {
+        in.read(buf.data(), buf.size());
+        std::streamsize r = in.gcount();
+        if (r > 0)
+            XXH3_64bits_update(state, buf.data(), static_cast<size_t>(r));
+    }
+
+    uint64_t hash = XXH3_64bits_digest(state);
+    XXH3_freeState(state);
+    return hash;
 }
 
 } // namespace fileHasher

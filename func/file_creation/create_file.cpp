@@ -48,7 +48,7 @@ static std::string deriveKeyBlake2b(const std::string& password) {
 
 bool compressed;
 bool packed;
-std::string global_hash;
+uint64_t global_hash;
 bool readAIOHeaderFromBMP(const std::string& bmp_file_path, std::string& original_filename, 
                           uint64_t& extracted_length, bool& is_encrypted) {
     std::ifstream file(bmp_file_path, std::ios::binary);
@@ -112,10 +112,9 @@ bool readAIOHeaderFromBMP(const std::string& bmp_file_path, std::string& origina
     aioReader.getString("v", version);
     aioReader.getBool("compress", compressed);
     aioReader.getBool("pack", packed);
-    aioReader.getString("hash", global_hash);
-    if (global_hash.empty()) {
+    aioReader.getUInt64("hash", global_hash);
+    if (global_hash == 0) {
         Logger::Log(LOG_WARNING, "No SHA-256 hash found in AIO header");
-        global_hash = "N/A";
     }
     // Validation checks
     if (original_filename.empty() || original_filename.length() > 512) {
@@ -136,7 +135,7 @@ bool readAIOHeaderFromBMP(const std::string& bmp_file_path, std::string& origina
     Logger::Log(LOG_DEBUG, "Version used: " + version);
     Logger::Log(LOG_DEBUG, "Compressed: " + std::string(compressed ? "Yes" : "No"));
     Logger::Log(LOG_DEBUG, "Packed: " + std::string(packed ? "Yes" : "No"));
-    Logger::Log(LOG_DEBUG, "SHA-256 Hash: " + global_hash);
+    Logger::Log(LOG_DEBUG, "xxHash: " + std::to_string(global_hash));
     return true;
 }
 
@@ -167,12 +166,12 @@ void create_file(const std::string& bmp_file_path) {
         Logger::Log(LOG_INFO, "AIO header detected in BMP. Reconstructing file: " + original_filename);
         
         readBMP(bmp_file_path, reconstructedFilePath, extracted_length, encryptionKey);
-        if (!disableHash || global_hash == "N/A") {
-            Logger::StartTimer("SHA-256 Hash Calculation");
-            std::string calcHash = fileHasher::hashFileSHA256(reconstructedFilePath);
-            Logger::EndTimer("SHA-256 Hash Calculation", LOG_INFO);
-            Logger::Log(LOG_DEBUG, "SHA-256 Hash of reconstructed file: " + calcHash);
-            if (global_hash == calcHash) {
+        if (!disableHash || global_hash == 0) {
+            Logger::StartTimer("xxHash Calculation");
+            uint64_t calcHash = fileHasher::xxhash_file(reconstructedFilePath);
+            Logger::EndTimer("xxHash Calculation", LOG_INFO);
+            Logger::Log(LOG_DEBUG, "xxHash of reconstructed file: " + std::to_string(calcHash));
+            if ((global_hash = calcHash)) {
                 Logger::Log(LOG_INFO, "Hash matches the original file hash.");
             } else {
                 Logger::Log(LOG_WARNING, "Hash does not match the original file hash.");
