@@ -4,6 +4,8 @@
 #include "../../utils/logger/logger.h"
 #include "../../utils/userinput/user_input.h"
 #include "../../globals.h"
+#include "../../version.h"
+#include "../../utils/hashers/fileHasher.hpp"
 #include <random>
 #include <sstream>
 #include <iomanip>
@@ -39,10 +41,10 @@ void create_img(const std::string& file_path) {
     std::uintmax_t size = inputFile.tellg();
     inputFile.seekg(0, std::ios::beg);
 
-    Data data;
-    data.original_filename = std::filesystem::path(file_path).filename().string();
-    data.binary_length = (size * 8);
-
+    json_utils::JsonMap data;
+    data["original_filename"] = std::filesystem::path(file_path).filename().string();
+    data["binary_length"] = std::to_string(size * 8);
+    
     std::string encryptionKey;
     if (no_encrypt) {
         encryptionKey.clear();
@@ -50,11 +52,29 @@ void create_img(const std::string& file_path) {
         // Default (AIO): random 32-byte key written to .mtd for compatibility
         encryptionKey = generateRandomKey(32);
     }
-    data.encryption_key = encryptionKey;
-
+    data["encryption_key"] = encryptionKey;
+    data["v"] = VERSION;
+    data["compress"] = isCompressed ? "true" : "false";
+    data["pack"] = isPacked ? "true" : "false";
+    if (!disableHash && twofile_system) {
+        Logger::StartTimer("xxHash calculation");
+        std::string hash = fileHasher::xxhash_file(file_path);
+        Logger::EndTimer("xxHash calculation", LOG_INFO);
+        data["hash"] = hash;
+    } else {
+        data["hash"] = "";
+    }
     if (twofile_system) {
+        if (shaEnabled) {
+            std::string sha = fileHasher::hashFileSHA256(file_path);
+            data["SHA"] = sha;
+        }
+        if (crcEnabled) {
+            std::string crc = fileHasher::crc32_file(file_path);
+            data["CRC"] = crc;
+        }
         Logger::Log(LOG_DEBUG, "Writing JSON file.");
-        write_json(save_path + '/' + file_name + ".mtd", data);
+        json_utils::write_json(save_path + '/' + file_name + ".mtd", data);
     }
 
     if (!twofile_system && !no_encrypt) {

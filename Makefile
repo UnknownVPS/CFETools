@@ -52,7 +52,7 @@ XZ_WIN_LIB = $(XZ_WIN_ROOT)/lib
 
 # === Compiler flags ===
 COMPILE_FLAGS = -Wall -std=c++23 -O3 -pthread -DUSE_LZ4 -DUSE_ZSTD -DUSE_LIBLZMA
-LINK_FLAGS = -lsodium -static-libstdc++ -pthread -llz4 -lzstd -llzma -static
+LINK_FLAGS = -lsodium -flto -pthread -llz4 -lzstd -llzma -static
 ANDROID_COMPILE_FLAGS = $(COMPILE_FLAGS) -I$(LIBSODIUM_INCLUDE) -I$(LZ4_ANDROID_INCLUDE) -I$(ZSTD_ANDROID_INCLUDE) -I$(XZ_ANDROID_INCLUDE)
 # Example: static for compressors only, dynamic for system libs
 ANDROID_LINK_FLAGS = -L$(LIBSODIUM_LIB) -L$(LZ4_ANDROID_LIB) -L$(ZSTD_ANDROID_LIB) -L$(XZ_ANDROID_LIB) -Wl,-Bstatic -llz4 -lzstd -llzma -Wl,-Bdynamic -lsodium -static-libstdc++
@@ -69,7 +69,6 @@ VERSION_FILE = version.h
 SRCS = utils/userinput/user_input.cpp \
        utils/bmp/writer/bmp_writer.cpp \
        utils/bmp/reader/bmp_reader.cpp \
-       utils/json/json.cpp \
        func/img_creation/create_img.cpp \
        func/file_creation/create_file.cpp \
        utils/logger/logger.cpp \

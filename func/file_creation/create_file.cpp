@@ -37,6 +37,80 @@ void compress_handle(const std::string& save_path, const std::string& reconstruc
     }
 }
 
+bool hash_handle(const std::string& file_path,
+                 const std::string& global_hash,
+                 const std::string& sha,
+                 const std::string& crc) 
+{
+    bool result = true; // assume all hashes match
+
+    // Check xxHash
+    if (!global_hash.empty() && !disableHash) {
+        Logger::StartTimer("xxHash calculation");
+        std::string hash = fileHasher::xxhash_file(file_path);
+        Logger::EndTimer("xxHash calculation", LOG_INFO);
+        Logger::Log(LOG_DEBUG, "xxHash of the file: " + hash);
+        if (hash == global_hash) {
+            Logger::Log(LOG_INFO, "Hash matches the original file hash.");
+        } else {
+            Logger::Log(LOG_WARNING, "Hash does not match the original file hash.");
+            result = false;
+        }
+    }
+
+    // Check SHA-256
+    if (!sha.empty() && !shaEnabled) {
+        Input inputprompt;
+        std::string response = inputprompt.ask("SHA-256 hash found but SHA verification is disabled. Do you want to enable it? (y/n): ");
+        if (response == "Y" || response == "y") {
+            shaEnabled = true;
+        } else {
+            Logger::Log(LOG_INFO, "Skipping SHA-256 verification as per user choice.");
+        }
+    }
+    if (!crc.empty() && !crcEnabled) {
+        Input inputprompt;
+        std::string response = inputprompt.ask("CRC32 hash found but CRC verification is disabled. Do you want to enable it? (y/n): ");
+        if (response == "Y" || response == "y") {
+            crcEnabled = true;
+        } else {
+            Logger::Log(LOG_INFO, "Skipping CRC32 verification as per user choice.");
+        }
+    }
+    if (!sha.empty() && shaEnabled) {
+        Logger::StartTimer("SHA-256 calculation");
+        std::string file_sha = fileHasher::hashFileSHA256(file_path);
+        Logger::EndTimer("SHA-256 calculation", LOG_INFO);
+        Logger::Log(LOG_DEBUG, "SHA-256 of the file: " + file_sha);
+        if (file_sha == sha) {
+            Logger::Log(LOG_INFO, "SHA-256 matches the original file SHA-256.");
+        } else {
+            Logger::Log(LOG_WARNING, "SHA-256 does not match the original file SHA-256.");
+            result = false;
+        }
+    }
+
+    // Check CRC32
+    if (!crc.empty() && crcEnabled) {
+        Logger::StartTimer("CRC32 calculation");
+        std::string file_crc = fileHasher::crc32_file(file_path);
+        Logger::EndTimer("CRC32 calculation", LOG_INFO);
+        Logger::Log(LOG_DEBUG, "CRC32 of the file: " + file_crc);
+        if (file_crc == crc) {
+            Logger::Log(LOG_INFO, "CRC32 matches the original file CRC32.");
+        } else {
+            Logger::Log(LOG_WARNING, "CRC32 does not match the original file CRC32.");
+            result = false;
+        }
+    }
+
+    if (global_hash.empty() && sha.empty() && crc.empty()) {
+        Logger::Log(LOG_INFO, "No hashes provided, skipping hash verification.");
+    }
+
+    return result;
+}
+
 static std::string deriveKeyBlake2b(const std::string& password) {
     unsigned char out[32];
     crypto_generichash(out, sizeof out,
@@ -48,7 +122,9 @@ static std::string deriveKeyBlake2b(const std::string& password) {
 
 bool compressed;
 bool packed;
-uint64_t global_hash;
+string global_hash;
+std::string sha;
+std::string crc;
 bool readAIOHeaderFromBMP(const std::string& bmp_file_path, std::string& original_filename, 
                           uint64_t& extracted_length, bool& is_encrypted) {
     std::ifstream file(bmp_file_path, std::ios::binary);
@@ -112,10 +188,13 @@ bool readAIOHeaderFromBMP(const std::string& bmp_file_path, std::string& origina
     aioReader.getString("v", version);
     aioReader.getBool("compress", compressed);
     aioReader.getBool("pack", packed);
-    aioReader.getUInt64("hash", global_hash);
-    if (global_hash == 0) {
+    aioReader.getString("hash", global_hash);
+    if (global_hash.empty()) {
         Logger::Log(LOG_WARNING, "No SHA-256 hash found in AIO header");
     }
+
+    aioReader.getString("SHA", sha);
+    aioReader.getString("CRC", crc);
     // Validation checks
     if (original_filename.empty() || original_filename.length() > 512) {
         Logger::Log(LOG_ERROR, "Invalid filename in AIO header");
@@ -135,7 +214,7 @@ bool readAIOHeaderFromBMP(const std::string& bmp_file_path, std::string& origina
     Logger::Log(LOG_DEBUG, "Version used: " + version);
     Logger::Log(LOG_DEBUG, "Compressed: " + std::string(compressed ? "Yes" : "No"));
     Logger::Log(LOG_DEBUG, "Packed: " + std::string(packed ? "Yes" : "No"));
-    Logger::Log(LOG_DEBUG, "xxHash: " + std::to_string(global_hash));
+    Logger::Log(LOG_DEBUG, "xxHash: " + global_hash);
     return true;
 }
 
@@ -166,18 +245,7 @@ void create_file(const std::string& bmp_file_path) {
         Logger::Log(LOG_INFO, "AIO header detected in BMP. Reconstructing file: " + original_filename);
         
         readBMP(bmp_file_path, reconstructedFilePath, extracted_length, encryptionKey);
-        if (!disableHash || global_hash == 0) {
-            Logger::StartTimer("xxHash Calculation");
-            uint64_t calcHash = fileHasher::xxhash_file(reconstructedFilePath);
-            Logger::EndTimer("xxHash Calculation", LOG_INFO);
-            Logger::Log(LOG_DEBUG, "xxHash of reconstructed file: " + std::to_string(calcHash));
-            if ((global_hash = calcHash)) {
-                Logger::Log(LOG_INFO, "Hash matches the original file hash.");
-            } else {
-                Logger::Log(LOG_WARNING, "Hash does not match the original file hash.");
-            }
-        }
-        Logger::Log(LOG_INFO, "Original file reconstructed successfully.");
+        hash_handle(reconstructedFilePath, global_hash, sha, crc) ? Logger::Log(LOG_INFO, "Original file reconstructed successfully.") : Logger::Log(LOG_WARNING, "File reconstruction failed (or) hash mismatch detected.");
         
         // Handle special file types
         if (packed) {
@@ -200,25 +268,40 @@ void create_file(const std::string& bmp_file_path) {
         return;
     }
 
-    Data data = read_json(metadata_file_path);
+    json_utils::JsonMap data = json_utils::read_json(metadata_file_path);
 
-    uint_fast64_t binary_length = data.binary_length;
-    original_filename = data.original_filename;
+    uint_fast64_t binary_length = std::stoull(data["binary_length"]);
+    original_filename = data["original_filename"];
     reconstructedFilePath = save_path + "/" + original_filename;
-
+    std::string hash_str = data["hash"];
+    if (!hash_str.empty()) {
+        global_hash = hash_str;
+    }
+    if (global_hash.empty()) {
+        Logger::Log(LOG_WARNING, "No xxHash found in metadata file");
+    }
+    bool isCompressed = (data["compress"] == "true");
+    bool isPacked = (data["pack"] == "true");
+    std::string version = data["v"];
+    std::string sha = data["SHA"];
+    std::string crc = data["CRC"];
     Logger::Log(LOG_DEBUG, "Original Filename: " + original_filename);
     Logger::Log(LOG_DEBUG, "Binary Length: " + std::to_string(binary_length));
-
-    std::string encryptionKey = data.encryption_key;
+    Logger::Log(LOG_DEBUG, "Version used: " + version);
+    Logger::Log(LOG_DEBUG, "Compressed: " + std::string(isCompressed ? "Yes" : "No"));
+    Logger::Log(LOG_DEBUG, "Packed: " + std::string(isPacked ? "Yes" : "No"));
+    Logger::Log(LOG_DEBUG, "xxHash: " + global_hash);
+    Logger::Log(LOG_DEBUG, "SHA-256: " + sha);
+    Logger::Log(LOG_DEBUG, "CRC32: " + crc);    
+    std::string encryptionKey = data["encryption_key"];
     readBMP(bmp_file_path, reconstructedFilePath, binary_length / 8, encryptionKey);
-
-    Logger::Log(LOG_INFO, "Original file reconstructed successfully.");
+    hash_handle(reconstructedFilePath, global_hash, sha, crc) ? Logger::Log(LOG_INFO, "Original file reconstructed successfully.") : Logger::Log(LOG_WARNING, "File reconstruction failed (or) hash mismatch detected.");
     
     // Handle special file types for legacy system
-    if (original_filename.size() > 5 && original_filename.compare(original_filename.size() - 5, 5, ".cfmp") == 0) {
+    if (isCompressed) {
         compress_handle(save_path, reconstructedFilePath);
     }
-    if (original_filename.size() > 5 && original_filename.compare(original_filename.size() - 5, 5, ".cfup") == 0) {
+    if (isPacked) {
         folder_handle(save_path, reconstructedFilePath, original_filename);
     }
 }

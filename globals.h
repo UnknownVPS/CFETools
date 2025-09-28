@@ -9,5 +9,7 @@ extern bool grayscale;
 extern bool twofile_system;
 extern bool disableHash;
 extern std::string save_path;
+extern bool shaEnabled;
+extern bool crcEnabled;
 
 #endif // GLOBALS_H

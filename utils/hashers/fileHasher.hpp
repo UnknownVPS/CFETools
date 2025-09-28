@@ -42,7 +42,7 @@ inline std::string hashFileSHA256(const std::string &path) {
 }
 
 // ================= CRC32 =================
-inline uint32_t& crc32Table() {
+inline uint32_t* crc32Table() {
     static uint32_t table[256];
     static bool initialized = false;
     if (!initialized) {
@@ -54,16 +54,15 @@ inline uint32_t& crc32Table() {
         }
         initialized = true;
     }
-    return table[0];
+    return table;
 }
 
-inline int crc32_file(const std::string& path) {
-    uint32_t* table = &crc32Table();
+inline std::string crc32_file(const std::string& path) {
+    uint32_t* table = crc32Table();
     std::ifstream in(path, std::ios::binary);
     if (!in) throw std::runtime_error("File not found");
-
     uint32_t crc = 0xFFFFFFFF;
-    std::vector<char> buf(1024 * 1024); // 1 MB chunks
+    std::vector<char> buf(1024 * 1024);
     while (in) {
         in.read(buf.data(), buf.size());
         std::streamsize r = in.gcount();
@@ -72,11 +71,14 @@ inline int crc32_file(const std::string& path) {
             crc = (crc >> 8) ^ table[(crc ^ byte) & 0xFF];
         }
     }
-    return crc ^ 0xFFFFFFFF;
+    crc ^= 0xFFFFFFFF;
+    std::ostringstream oss;
+    oss << std::hex << std::uppercase << crc;
+    return oss.str();
 }
 
 // ================= XXHASH3 =================
-inline uint64_t xxhash_file(const std::string &path) {
+inline std::string xxhash_file(const std::string &path) {
     std::ifstream in(path, std::ios::binary);
     if (!in) throw std::runtime_error("File not found");
 
@@ -94,7 +96,9 @@ inline uint64_t xxhash_file(const std::string &path) {
 
     uint64_t hash = XXH3_64bits_digest(state);
     XXH3_freeState(state);
-    return hash;
+    std::ostringstream oss;
+    oss << std::hex << std::uppercase << hash;
+    return oss.str();
 }
 
 } // namespace fileHasher

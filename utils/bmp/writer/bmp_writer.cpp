@@ -158,14 +158,30 @@ private:
             aioWriter.addString("v", VERSION);                    // Auto-calculates (probably 1 bit)
             aioWriter.addBool("compress", isCompressed);
             aioWriter.addBool("pack", isPacked);
-            uint64_t hash = 0;
+            std::string hash;
             if (!disableHash) {
                 Logger::StartTimer("xxHash calculation");
                 hash = fileHasher::xxhash_file(inputFilename);
                 Logger::EndTimer("xxHash calculation", LOG_INFO);
             }
-            aioWriter.addUInt64("hash", hash);
-            // Get the total size for offset calculation
+            aioWriter.addString("hash", hash);
+            std::string sha = "";
+            std::string crc = "";
+            if (shaEnabled) {
+                Logger::StartTimer("SHA Hashing");
+                sha = fileHasher::hashFileSHA256(inputFilename);
+                Logger::Log(LOG_DEBUG, "SHA: " + sha);
+                Logger::EndTimer("SHA Hashing", LOG_DEBUG);
+                aioWriter.addString("SHA", sha);
+            } 
+            if (crcEnabled) {
+                Logger::StartTimer("CRC32 Hashing");
+                crc = fileHasher::crc32_file(inputFilename);
+                Logger::Log(LOG_DEBUG, "CRC32: " + crc);
+                Logger::EndTimer("CRC32 Hashing", LOG_DEBUG);
+                aioWriter.addString("CRC", crc);
+            }
+           // Get the total size for offset calculation
             aioHeaderSize = aioWriter.getTotalSize();
         }
 

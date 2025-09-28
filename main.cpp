@@ -20,6 +20,8 @@ bool isCompressed = false;
 bool isPacked = false;
 bool disableHash = false;
 std::string save_path = "";
+bool shaEnabled = false;
+bool crcEnabled = false;
 
 class ArgParser {
 private:
@@ -113,10 +115,8 @@ int main(int argc, char* argv[]) {
             return 1;
         }
         try {
-            uint32_t crc = fileHasher::crc32_file(path);
-            std::ostringstream oss;
-            oss << std::hex << std::uppercase << crc;
-            Logger::Log(LOG_INFO, "CRC32: " + oss.str());
+            std::string crc = fileHasher::crc32_file(path);
+            Logger::Log(LOG_INFO, "CRC32: " + crc);
         } catch (const std::exception& e) {
             Logger::Log(LOG_ERROR, std::string("Error calculating CRC32: ") + e.what());
             return 1;
@@ -131,19 +131,43 @@ int main(int argc, char* argv[]) {
             return 1;
         }
         try {
-            uint64_t hash = fileHasher::xxhash_file(path);
-
-            Logger::Log(LOG_INFO, "xxHash64: " + std::to_string(hash));
+            std::string hash = fileHasher::xxhash_file(path);
+            Logger::Log(LOG_INFO, "xxHash64: " + hash);
         } catch (const std::exception& e) {
             Logger::Log(LOG_ERROR, std::string("Error hashing file: ") + e.what());
             return 1;
         }
         return 0;
     }
+
+    if (parser.hasFlag("config", "cfg")) {
+        std::string cfg_value = parser.getValue("config", "cfg", "");
+        std::vector<std::string> cfg_params;
+        if (!cfg_value.empty()) {
+            size_t start = 0, end = 0;
+            while ((end = cfg_value.find(',', start)) != std::string::npos) {
+                std::string param = cfg_value.substr(start, end - start);
+                if (!param.empty()) cfg_params.push_back(param);
+                start = end + 1;
+            }
+            std::string last = cfg_value.substr(start);
+            if (!last.empty()) cfg_params.push_back(last);
+        }
+        Logger::Log(LOG_INFO, "Parsed config params:");
+        for (const auto& param : cfg_params) {
+            Logger::Log(LOG_INFO, "  - " + param);
+            if (param == "sha") {
+                shaEnabled = true;
+            } else if (param == "crc") {
+                crcEnabled = true;
+            }
+        }
+        
+    }
     std::string compress_arg = parser.getValue("compress", "c", "");
     std::string img_input = parser.getValue("img", "i", "");
     std::string file_input = parser.getValue("file", "f", "");
-    Logger::Log(LOG_INFO, std::string("Following modes are enabled: ") + (twofile_system ? "2 Filesystem (Discontinued) " : "") + (grayscale ? "8-bit " : "1-bit ") + (no_encrypt ? "Unencrypted " : "Encrypted "));
+    Logger::Log(LOG_INFO, std::string("Following modes are enabled: ") + (twofile_system ? "2 Filesystem " : "") + (grayscale ? "8-bit " : "1-bit ") + (no_encrypt ? "Unencrypted " : "Encrypted "));
     // System checks
     Logger::Log(LOG_DEBUG, "Checking system type");
     #ifdef _WIN32
@@ -226,7 +250,11 @@ int main(int argc, char* argv[]) {
             int compress_level = std::stoi(compress_arg);
             Logger::Log(LOG_DEBUG, "Compressing");
             Logger::StartTimer("File compression");
-            compressFile(path_to_encode, (std::filesystem::path(save_path) / compressedFilename).string(), compress_level);
+            if (!compressFile(path_to_encode, (std::filesystem::path(save_path) / compressedFilename).string(), compress_level)) {
+                Logger::Log(LOG_ERROR, "Failed to compress file.");
+                return 1;
+            }
+            Logger::Log(LOG_INFO, "Compression done");
             Logger::EndTimer("File compression", LOG_INFO);
             if (std::filesystem::is_directory(inputPath)) {
                 Logger::Log(LOG_INFO, "Removing temporary packed folder: " + path_to_encode);

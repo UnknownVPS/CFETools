@@ -153,7 +153,20 @@ bool decompressFile(const std::string& input_file, const std::string& output_fil
                         total_decompressed += dstSize;
                     }
 
-                    srcPtr += (srcSizeOrig - srcSize);
+                    // CRITICAL FIX: Check if we're done or no progress made
+                    if (result == 0) {
+                        // Frame is complete, break out of inner loop
+                        break;
+                    }
+                    
+                    size_t consumed = srcSizeOrig - srcSize;
+                    if (consumed == 0 && dstSize == 0) {
+                        // No progress made, avoid infinite loop
+                        std::cerr << "LZ4F decompression stalled" << std::endl;
+                        break;
+                    }
+                    
+                    srcPtr += consumed;
                 }
             }
 
