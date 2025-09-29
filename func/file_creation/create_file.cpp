@@ -22,7 +22,7 @@ void folder_handle (const std::string& save_path, const std::string& reconstruct
     }
 }
 
-void compress_handle(const std::string& save_path, const std::string& reconstructedFilePath) {
+void compress_handle(const std::string& save_path, const std::string& reconstructedFilePath, bool isPacked) {
     Logger::Log(LOG_INFO, "Detected .cfmp file, starting decompression...");
     std::string decompressedFilePath = reconstructedFilePath.substr(0, reconstructedFilePath.size() - 5);
     if (decompressFile(reconstructedFilePath, decompressedFilePath)) {
@@ -30,8 +30,7 @@ void compress_handle(const std::string& save_path, const std::string& reconstruc
     } else {
         Logger::Log(LOG_ERROR, "Decompression failed for: " + reconstructedFilePath);
     }
-    if (decompressedFilePath.size() > 5 && 
-        decompressedFilePath.compare(decompressedFilePath.size() - 5, 5, ".cfup") == 0) {
+    if (isPacked) {
         Logger::Log(LOG_DEBUG, save_path + " " + decompressedFilePath + " " + std::filesystem::path(decompressedFilePath).filename().string());
         folder_handle(save_path, decompressedFilePath, std::filesystem::path(decompressedFilePath).filename().string());
     }
@@ -248,12 +247,13 @@ void create_file(const std::string& bmp_file_path) {
         hash_handle(reconstructedFilePath, global_hash, sha, crc) ? Logger::Log(LOG_INFO, "Original file reconstructed successfully.") : Logger::Log(LOG_WARNING, "File reconstruction failed (or) hash mismatch detected.");
         
         // Handle special file types
-        if (packed) {
+        if (compressed) {
+            compress_handle(save_path, reconstructedFilePath, packed);
+        }
+        if (packed && !compressed) {
             folder_handle(save_path, reconstructedFilePath, original_filename);
         }
-        if (compressed) {
-            compress_handle(save_path, reconstructedFilePath);
-        }
+
         return;
     }
 
@@ -299,9 +299,9 @@ void create_file(const std::string& bmp_file_path) {
     
     // Handle special file types for legacy system
     if (isCompressed) {
-        compress_handle(save_path, reconstructedFilePath);
+        compress_handle(save_path, reconstructedFilePath, isPacked);
     }
-    if (isPacked) {
+    if (isPacked && !isCompressed) {
         folder_handle(save_path, reconstructedFilePath, original_filename);
     }
 }
