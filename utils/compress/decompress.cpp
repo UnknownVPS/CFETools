@@ -154,6 +154,7 @@ bool decompressFile(const std::string& input_file, const std::string& output_fil
                     }
 
                     // CRITICAL FIX: Check if we're done or no progress made
+                    
                     if (result == 0) {
                         // Frame is complete, break out of inner loop
                         break;
@@ -167,6 +168,8 @@ bool decompressFile(const std::string& input_file, const std::string& output_fil
                     }
                     
                     srcPtr += consumed;
+                    
+                    // srcPtr += (srcSizeOrig - srcSize);
                 }
             }
 
