@@ -116,110 +116,127 @@ bool decompressFile(const std::string& input_file, const std::string& output_fil
 
     try {
         if (format == CompressionFormat::LZ4F) {
-            // LZ4F decompression
-#ifdef USE_LZ4
-            LZ4F_dctx* dctx = nullptr;
-            LZ4F_errorCode_t result = LZ4F_createDecompressionContext(&dctx, LZ4F_VERSION);
-            if (LZ4F_isError(result)) {
-                std::cerr << "LZ4F context creation failed: " << LZ4F_getErrorName(result) << std::endl;
+        #ifdef USE_LZ4
+            LZ4F_decompressionContext_t dctx;
+            LZ4F_errorCode_t createResult = LZ4F_createDecompressionContext(&dctx, LZ4F_VERSION);
+            if (LZ4F_isError(createResult)) {
+                std::cerr << "LZ4F context creation failed: " << LZ4F_getErrorName(createResult) << std::endl;
                 return false;
             }
 
-            std::vector<char> inBuf(CHUNK_SIZE);
-            std::vector<char> outBuf(CHUNK_SIZE * 4); // Larger output buffer for decompression
+            const size_t IN_BUF_SIZE = 256 * 1024;
+            const size_t OUT_BUF_SIZE = 4 * 1024 * 1024;
+            
+            std::vector<char> inBuf(IN_BUF_SIZE);
+            std::vector<char> outBuf(OUT_BUF_SIZE);
 
-            while (infile && !infile.eof()) {
-                infile.read(inBuf.data(), CHUNK_SIZE);
-                std::streamsize bytesRead = infile.gcount();
-                if (bytesRead <= 0) break;
+            size_t inPos = 0;
+            size_t inSize = 0;
+            bool endOfFile = false;
 
-                const char* srcPtr = inBuf.data();
-                size_t srcSize = bytesRead;
-
-                while (srcSize > 0) {
-                    char* dstPtr = outBuf.data();
-                    size_t dstSize = outBuf.size();
-                    size_t srcSizeOrig = srcSize;
-
-                    size_t result = LZ4F_decompress(dctx, dstPtr, &dstSize, srcPtr, &srcSize, nullptr);
-                    if (LZ4F_isError(result)) {
-                        std::cerr << "LZ4F decompression error: " << LZ4F_getErrorName(result) << std::endl;
-                        LZ4F_freeDecompressionContext(dctx);
-                        return false;
-                    }
-
-                    if (dstSize > 0) {
-                        outfile.write(dstPtr, dstSize);
-                        total_decompressed += dstSize;
-                    }
-
-                    // CRITICAL FIX: Check if we're done or no progress made
-                    
-                    if (result == 0) {
-                        // Frame is complete, break out of inner loop
+            while (!endOfFile) {
+                // Read more data if input buffer is depleted
+                if (inPos >= inSize) {
+                    if (!infile.eof()) {
+                        infile.read(inBuf.data(), IN_BUF_SIZE);
+                        inSize = infile.gcount();
+                        inPos = 0;
+                        
+                        if (inSize == 0) break;
+                    } else {
                         break;
                     }
-                    
-                    size_t consumed = srcSizeOrig - srcSize;
-                    if (consumed == 0 && dstSize == 0) {
-                        // No progress made, avoid infinite loop
-                        std::cerr << "LZ4F decompression stalled" << std::endl;
-                        break;
-                    }
-                    
-                    srcPtr += consumed;
-                    
-                    // srcPtr += (srcSizeOrig - srcSize);
+                }
+
+                // Prepare input and output
+                size_t srcSize = inSize - inPos;
+                const char* srcPtr = inBuf.data() + inPos;
+                char* dstPtr = outBuf.data();
+                size_t dstCapacity = OUT_BUF_SIZE;
+
+                // Decompress
+                size_t decompResult = LZ4F_decompress(
+                    dctx,
+                    dstPtr, &dstCapacity,
+                    srcPtr, &srcSize,
+                    NULL
+                );
+
+                if (LZ4F_isError(decompResult)) {
+                    std::cerr << "LZ4F decompression error: " << LZ4F_getErrorName(decompResult) << std::endl;
+                    LZ4F_freeDecompressionContext(dctx);
+                    return false;
+                }
+
+                // Write decompressed data
+                if (dstCapacity > 0) {
+                    outfile.write(dstPtr, dstCapacity);
+                    total_decompressed += dstCapacity;
+                }
+
+                // Update input position
+                inPos += srcSize;
+
+                // Check if frame is complete
+                if (decompResult == 0) {
+                    endOfFile = true;
+                    break;
+                }
+
+                // Prevent infinite loop
+                if (srcSize == 0 && dstCapacity == 0) {
+                    if (infile.eof()) break;
                 }
             }
 
             LZ4F_freeDecompressionContext(dctx);
-            success = true;
-#else
+            success = (total_decompressed > 0);
+        #else
             std::cerr << "Error: LZ4 not available for decompression" << std::endl;
-#endif
+            success = false;
+        #endif
         }
-        else if (format == CompressionFormat::ZSTD) {
-            // ZSTD decompression
-#ifdef USE_ZSTD
-            ZSTD_DCtx* dctx = ZSTD_createDCtx();
-            if (!dctx) {
-                std::cerr << "ZSTD decompression context creation failed" << std::endl;
-                return false;
-            }
-
-            std::vector<char> inBuf(CHUNK_SIZE);
-            std::vector<char> outBuf(CHUNK_SIZE * 4);
-
-            while (infile && !infile.eof()) {
-                infile.read(inBuf.data(), CHUNK_SIZE);
-                std::streamsize bytesRead = infile.gcount();
-                if (bytesRead <= 0) break;
-
-                ZSTD_inBuffer input = { inBuf.data(), static_cast<size_t>(bytesRead), 0 };
-
-                while (input.pos < input.size) {
-                    ZSTD_outBuffer output = { outBuf.data(), outBuf.size(), 0 };
-
-                    size_t result = ZSTD_decompressStream(dctx, &output, &input);
-                    if (ZSTD_isError(result)) {
-                        std::cerr << "ZSTD decompression error: " << ZSTD_getErrorName(result) << std::endl;
-                        ZSTD_freeDCtx(dctx);
+                else if (format == CompressionFormat::ZSTD) {
+                    // ZSTD decompression
+        #ifdef USE_ZSTD
+                    ZSTD_DCtx* dctx = ZSTD_createDCtx();
+                    if (!dctx) {
+                        std::cerr << "ZSTD decompression context creation failed" << std::endl;
                         return false;
                     }
 
-                    if (output.pos > 0) {
-                        outfile.write(static_cast<char*>(output.dst), output.pos);
-                        total_decompressed += output.pos;
-                    }
-                }
-            }
+                    std::vector<char> inBuf(CHUNK_SIZE);
+                    std::vector<char> outBuf(CHUNK_SIZE * 4);
 
-            ZSTD_freeDCtx(dctx);
-            success = true;
-#else
-            std::cerr << "Error: ZSTD not available for decompression" << std::endl;
-#endif
+                    while (infile && !infile.eof()) {
+                        infile.read(inBuf.data(), CHUNK_SIZE);
+                        std::streamsize bytesRead = infile.gcount();
+                        if (bytesRead <= 0) break;
+
+                        ZSTD_inBuffer input = { inBuf.data(), static_cast<size_t>(bytesRead), 0 };
+
+                        while (input.pos < input.size) {
+                            ZSTD_outBuffer output = { outBuf.data(), outBuf.size(), 0 };
+
+                            size_t result = ZSTD_decompressStream(dctx, &output, &input);
+                            if (ZSTD_isError(result)) {
+                                std::cerr << "ZSTD decompression error: " << ZSTD_getErrorName(result) << std::endl;
+                                ZSTD_freeDCtx(dctx);
+                                return false;
+                            }
+
+                            if (output.pos > 0) {
+                                outfile.write(static_cast<char*>(output.dst), output.pos);
+                                total_decompressed += output.pos;
+                            }
+                        }
+                    }
+
+                    ZSTD_freeDCtx(dctx);
+                    success = true;
+        #else
+                    std::cerr << "Error: ZSTD not available for decompression" << std::endl;
+        #endif
         }
         else if (format == CompressionFormat::LZMA2_XZ) {
             // LZMA2/XZ decompression
