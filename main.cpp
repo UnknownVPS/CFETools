@@ -216,7 +216,7 @@ int main(int argc, char* argv[]) {
             return 2;
         }
         Logger::StartTimer("Processing image to file");
-        create_file(img_input);
+        createFile(img_input);
         Logger::EndTimer("Processing image to file", LOG_INFO);
     }
 

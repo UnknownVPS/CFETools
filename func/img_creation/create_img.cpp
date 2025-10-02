@@ -22,10 +22,16 @@ static std::string deriveKeyBlake2b(const std::string& password) {
     return std::string(reinterpret_cast<char*>(out), sizeof out);
 }
 
-std::string generateRandomKey(size_t length) {
-    std::vector<uint8_t> key(length);
-    randombytes_buf(key.data(), length);
-    return std::string(key.begin(), key.end());
+// Generate 32-byte key and return as hex string
+std::string generateRandomKey() {
+    unsigned char key[crypto_aead_xchacha20poly1305_ietf_KEYBYTES]; // 32 bytes
+    crypto_aead_xchacha20poly1305_ietf_keygen(key);
+
+    // Hex encode
+    char hex[crypto_aead_xchacha20poly1305_ietf_KEYBYTES * 2 + 1];
+    sodium_bin2hex(hex, sizeof hex, key, sizeof key);
+
+    return std::string(hex);
 }
 
 void create_img(const std::string& file_path) {
@@ -50,7 +56,7 @@ void create_img(const std::string& file_path) {
         encryptionKey.clear();
     } else {
         // Default (AIO): random 32-byte key written to .mtd for compatibility
-        encryptionKey = generateRandomKey(32);
+        encryptionKey = generateRandomKey();
     }
     data["encryption_key"] = encryptionKey;
     data["v"] = VERSION;
