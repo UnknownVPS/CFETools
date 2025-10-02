@@ -5,8 +5,11 @@
 #include <vector>
 #include <fstream>
 #include <atomic>
+#include <mutex>
+#include <condition_variable>
 #include <cmath>
 #include <cstring>
+#include <queue>
 #include <filesystem>
 #include "../../../globals.h"
 #include "../../aio/aio_header.h"
@@ -14,96 +17,68 @@
 #include "../../hashers/fileHasher.hpp"
 #include "../../../utils/hashers/encryption.hpp"
 
-// Lock-free ring buffer for zero-copy batching
-template<size_t BufferCount>
-class RingBuffer {
-    struct Slot {
-        std::vector<char> data;
-        std::atomic<bool> ready{false};
-        std::atomic<bool> consumed{true};
-    };
-    
-    Slot slots[BufferCount];
-    std::atomic<size_t> writeIdx{0};
-    std::atomic<size_t> readIdx{0};
-    std::atomic<bool> done{false};
-    
+class PixelGenerator {
 public:
-    RingBuffer() {
-        // Pre-allocate all buffers to avoid runtime allocation
-        for (auto& slot : slots) {
-            slot.data.reserve(8 * 1024 * 1024); // 8MB per slot
-        }
-    }
-    
-    // Producer: get next available slot for writing
-    std::vector<char>* getWriteSlot() {
-        size_t idx = writeIdx.load(std::memory_order_relaxed);
-        while (!slots[idx].consumed.load(std::memory_order_acquire)) {
-            if (done.load(std::memory_order_relaxed)) return nullptr;
-            std::this_thread::yield();
-        }
-        return &slots[idx].data;
-    }
-    
-    // Producer: mark slot as ready
-    void commitWrite(size_t size) {
-        size_t idx = writeIdx.load(std::memory_order_relaxed);
-        slots[idx].data.resize(size);
-        slots[idx].consumed.store(false, std::memory_order_release);
-        slots[idx].ready.store(true, std::memory_order_release);
-        writeIdx.store((idx + 1) % BufferCount, std::memory_order_release);
-    }
-    
-    // Consumer: get next ready slot
-    std::vector<char>* getReadSlot() {
-        size_t idx = readIdx.load(std::memory_order_relaxed);
-        while (!slots[idx].ready.load(std::memory_order_acquire)) {
-            if (done.load(std::memory_order_acquire) && 
-                !slots[idx].ready.load(std::memory_order_acquire)) {
-                return nullptr;
+    PixelGenerator(const std::string& inputFilename, const std::string& keyStr, bool no_encrypt = false)
+        : inputFile(inputFilename, std::ios::binary), no_encrypt(no_encrypt) {
+        if (!no_encrypt) {
+            if (sodium_init() < 0) throw std::runtime_error("libsodium init failed");
+            if (keyStr.size() != encryption::CHACHA20_KEY_SIZE) {
+                crypto_generichash(key, encryption::CHACHA20_KEY_SIZE, 
+                                   (const unsigned char*)keyStr.data(), keyStr.size(), nullptr, 0);
+            } else {
+                memcpy(key, keyStr.data(), encryption::CHACHA20_KEY_SIZE);
             }
-            std::this_thread::yield();
+            encrypted.resize(maxBatchSize);
         }
-        return &slots[idx].data;
+        buffer.resize(maxBatchSize);
     }
-    
-    // Consumer: mark slot as consumed
-    void commitRead() {
-        size_t idx = readIdx.load(std::memory_order_relaxed);
-        slots[idx].ready.store(false, std::memory_order_release);
-        slots[idx].consumed.store(true, std::memory_order_release);
-        readIdx.store((idx + 1) % BufferCount, std::memory_order_release);
+
+    std::vector<char> getEncryptedBatch(size_t batchSize, uint64_t nonceCounter) {
+        inputFile.read(reinterpret_cast<char*>(buffer.data()), batchSize);
+        size_t bytesRead = inputFile.gcount();
+        if (bytesRead == 0) return {};
+
+        if (no_encrypt) {
+            return std::vector<char>(reinterpret_cast<char*>(buffer.data()), 
+                                     reinterpret_cast<char*>(buffer.data()) + bytesRead);
+        }
+
+        encryption::chacha20_xor(buffer.data(), bytesRead, encrypted.data(), key, nonceCounter);
+        return std::vector<char>(encrypted.begin(), encrypted.begin() + bytesRead);
     }
-    
-    void setDone() { done.store(true, std::memory_order_release); }
+
+    bool isEOF() const { return inputFile.eof(); }
+
+private:
+    std::ifstream inputFile;
+    uint8_t key[encryption::CHACHA20_KEY_SIZE];
+    std::vector<uint8_t> buffer;
+    std::vector<uint8_t> encrypted;
+    const size_t maxBatchSize = 1024 * 1024;
+    bool no_encrypt;
 };
 
-class FastPixelWriter {
+class PixelWriter {
 public:
-    FastPixelWriter(const std::string& filename, const std::string& inputFilename, 
-                    int_fast32_t width, int_fast32_t height, bool grayscale = false, 
-                    bool twofile_system = false, bool no_encrypt = false)
-        : width(width), height(height), grayscale(grayscale), 
+    PixelWriter(const std::string& filename, const std::string& inputFilename, int_fast32_t width, int_fast32_t height, 
+                bool grayscale = false, bool twofile_system = false, bool no_encrypt = false)
+        : file(filename, std::ios::binary), width(width), height(height), grayscale(grayscale), 
           twofile_system(twofile_system), inputFilename(inputFilename), no_encrypt(no_encrypt) {
-        
-        // Open with larger buffer for better OS-level performance
-        file.rdbuf()->pubsetbuf(nullptr, 0); // Unbuffered for direct writes
-        file.open(filename, std::ios::binary | std::ios::out);
-        if (!file) throw std::runtime_error("Failed to open output file");
-        
         writeHeaders();
     }
 
-    void writePixelsBatch(const char* data, size_t size) {
-        file.write(data, size);
+    void writePixelsBatch(const std::vector<char>& encryptedBytes) {
+        file.write(encryptedBytes.data(), encryptedBytes.size());
     }
 
     void finish() {
         int rowSize;
         if (grayscale) {
+            // 8-bit grayscale: each pixel is 1 byte, rows padded to 4-byte boundary
             rowSize = ((width + 3) / 4) * 4;
         } else {
+            // 1-bit monochrome: 8 pixels per byte, rows padded to 4-byte boundary
             rowSize = ((width + 31) / 32) * 4;
         }
 
@@ -145,12 +120,14 @@ private:
         int colorTableSize;
 
         if (grayscale) {
+            // 8-bit grayscale
             infoHeader.bit_count = 8;
             infoHeader.colors_used = 256;
             infoHeader.colors_important = 256;
             rowSize = ((width + 3) / 4) * 4;
             colorTableSize = sizeof(unsigned int) * 256;
         } else {
+            // 1-bit monochrome
             infoHeader.bit_count = 1;
             infoHeader.colors_used = 2;
             infoHeader.colors_important = 2;
@@ -158,26 +135,29 @@ private:
             colorTableSize = sizeof(unsigned int) * 2;
         }
 
+        // Calculate AIO header size FIRST
         size_t aioHeaderSize = 0;
-        AIOHeaderWriter aioWriter;
+        AIOHeaderWriter aioWriter; // Declare outside if block for proper scope
         
         if (!twofile_system) {
+            // Get file size for binary length calculation
             std::ifstream testFile(inputFilename, std::ios::binary | std::ios::ate);
             uint64_t binLen = 0;
             if (testFile) {
-                binLen = static_cast<uint64_t>(testFile.tellg()) * 8;
+                binLen = static_cast<uint64_t>(testFile.tellg()) * 8; // Convert bytes to bits
                 testFile.close();
             }
             
+            // Extract filename from path
             std::string fname = std::filesystem::path(inputFilename).filename().string();
             
-            aioWriter.addUInt64("binary_length", binLen);
-            aioWriter.addString("filename", fname);
-            aioWriter.addBool("encrypted", !no_encrypt);
-            aioWriter.addString("v", VERSION);
+            // Add fields with automatic bit calculation
+            aioWriter.addUInt64("binary_length", binLen);        // Auto-calculates bits needed
+            aioWriter.addString("filename", fname);              // String length auto-calculated
+            aioWriter.addBool("encrypted", !no_encrypt);       // Always 1 bit
+            aioWriter.addString("v", VERSION);                    // Auto-calculates (probably 1 bit)
             aioWriter.addBool("compress", isCompressed);
             aioWriter.addBool("pack", isPacked);
-            
             std::string hash;
             if (!disableHash) {
                 Logger::StartTimer("xxHash calculation");
@@ -185,42 +165,49 @@ private:
                 Logger::EndTimer("xxHash calculation", LOG_INFO);
             }
             aioWriter.addString("hash", hash);
-            
+            std::string sha = "";
+            std::string crc = "";
             if (shaEnabled) {
                 Logger::StartTimer("SHA Hashing");
-                std::string sha = fileHasher::hashFileSHA256(inputFilename);
+                sha = fileHasher::hashFileSHA256(inputFilename);
                 Logger::Log(LOG_DEBUG, "SHA: " + sha);
                 Logger::EndTimer("SHA Hashing", LOG_DEBUG);
                 aioWriter.addString("SHA", sha);
             } 
             if (crcEnabled) {
                 Logger::StartTimer("CRC32 Hashing");
-                std::string crc = fileHasher::crc32_file(inputFilename);
+                crc = fileHasher::crc32_file(inputFilename);
                 Logger::Log(LOG_DEBUG, "CRC32: " + crc);
                 Logger::EndTimer("CRC32 Hashing", LOG_DEBUG);
                 aioWriter.addString("CRC", crc);
             }
+           // Get the total size for offset calculation
             aioHeaderSize = aioWriter.getTotalSize();
         }
 
+        // NOW calculate the correct offset
         fileHeader.offset_data = sizeof(BMPFileHeader) + sizeof(BMPInfoHeader) + colorTableSize + static_cast<uint32_t>(aioHeaderSize);
         int pixelDataSize = rowSize * abs(height);
         fileHeader.file_size = fileHeader.offset_data + pixelDataSize;
         infoHeader.size_image = pixelDataSize;
 
+        // Write headers in correct order
         file.write(reinterpret_cast<const char*>(&fileHeader), sizeof(fileHeader));
         file.write(reinterpret_cast<const char*>(&infoHeader), sizeof(infoHeader));
 
         if (grayscale) {
+            // Write grayscale color table (0-255)
             for (int i = 0; i < 256; i++) {
-                unsigned int grayColor = (i << 16) | (i << 8) | i;
+                unsigned int grayColor = (i << 16) | (i << 8) | i; // RGB all same value for gray
                 file.write(reinterpret_cast<const char*>(&grayColor), sizeof(grayColor));
             }
         } else {
+            // Write monochrome color table
             unsigned int colorTable[2] = { 0x00000000, 0x00FFFFFF };
             file.write(reinterpret_cast<const char*>(colorTable), sizeof(colorTable));
         }
 
+        // Write AIO header if enabled (aioWriter is already prepared above)
         if (!twofile_system) {
             aioWriter.writeToStream(file);
         }
@@ -229,42 +216,41 @@ private:
     }
 };
 
-// Specialized versions for encrypted and unencrypted paths
-class EncryptedProcessor {
-    uint8_t key[encryption::CHACHA20_KEY_SIZE];
-    std::vector<uint8_t> buffer;
-    std::vector<uint8_t> encrypted;
-    
+class ThreadSafeQueue {
 public:
-    EncryptedProcessor(const std::string& keyStr) {
-        if (sodium_init() < 0) throw std::runtime_error("libsodium init failed");
-        if (keyStr.size() != encryption::CHACHA20_KEY_SIZE) {
-            crypto_generichash(key, encryption::CHACHA20_KEY_SIZE, 
-                               (const unsigned char*)keyStr.data(), keyStr.size(), nullptr, 0);
-        } else {
-            memcpy(key, keyStr.data(), encryption::CHACHA20_KEY_SIZE);
-        }
-        buffer.resize(8 * 1024 * 1024);
-        encrypted.resize(8 * 1024 * 1024);
+    void push(std::vector<char>&& item) {
+        std::unique_lock<std::mutex> lock(mutex);
+        queue.push(std::move(item));
+        lock.unlock();
+        cond.notify_one();
     }
-    
-    size_t process(std::ifstream& inputFile, char* output, uint64_t nonceCounter) {
-        inputFile.read(reinterpret_cast<char*>(buffer.data()), buffer.size());
-        size_t bytesRead = inputFile.gcount();
-        if (bytesRead == 0) return 0;
-        
-        encryption::chacha20_xor(buffer.data(), bytesRead, encrypted.data(), key, nonceCounter);
-        memcpy(output, encrypted.data(), bytesRead);
-        return bytesRead;
-    }
-};
 
-class UnencryptedProcessor {
-public:
-    size_t process(std::ifstream& inputFile, char* output, uint64_t) {
-        inputFile.read(output, 8 * 1024 * 1024);
-        return inputFile.gcount();
+    bool pop(std::vector<char>& item) {
+        std::unique_lock<std::mutex> lock(mutex);
+        cond.wait(lock, [this] { return !queue.empty() || done; });
+        if (queue.empty()) return false;
+        item = std::move(queue.front());
+        queue.pop();
+        return true;
     }
+
+    void setDone() {
+        std::unique_lock<std::mutex> lock(mutex);
+        done = true;
+        lock.unlock();
+        cond.notify_all();
+    }
+
+    size_t size() const {
+        std::unique_lock<std::mutex> lock(mutex);
+        return queue.size();
+    }
+
+private:
+    std::queue<std::vector<char>> queue;
+    mutable std::mutex mutex;
+    std::condition_variable cond;
+    bool done = false;
 };
 
 void writeBMP(const std::string& filename, const std::string& inputFilename, const std::string& encryptionKey) {
@@ -275,62 +261,48 @@ void writeBMP(const std::string& filename, const std::string& inputFilename, con
         return;
     }
     std::streamsize size = inputFile.tellg();
-    inputFile.seekg(0);
+    inputFile.close();
 
     int_fast32_t width, height;
     if (grayscale) {
+        // For 8-bit grayscale, each byte is one pixel
         width = std::ceil(std::sqrt(size));
         height = width;
     } else {
+        // For 1-bit monochrome, each bit is one pixel (8 pixels per byte)
         width = std::ceil(std::sqrt(size * 8));
         height = width;
     }
 
     Logger::Log(LOG_DEBUG, "Encoding and writing file...");
 
-    FastPixelWriter writer(filename, inputFilename, width, height, grayscale, twofile_system, no_encrypt);
-    RingBuffer<4> ringBuffer; // 4 slots of 8MB each = 32MB total buffering
+    PixelGenerator generator(inputFilename, encryptionKey, no_encrypt);
+    PixelWriter writer(filename, inputFilename, width, height, grayscale, twofile_system, no_encrypt);
 
+    ThreadSafeQueue pixelQueue;
     std::atomic<bool> writerDone(false);
 
-    // Writer thread: minimal work, just write
+    // Writer thread: consumes encrypted pixel batches
     std::thread writerThread([&]() {
-        while (auto* slot = ringBuffer.getReadSlot()) {
-            writer.writePixelsBatch(slot->data(), slot->size());
-            ringBuffer.commitRead();
+        std::vector<char> pixelBatch;
+        while (pixelQueue.pop(pixelBatch)) {
+            writer.writePixelsBatch(pixelBatch);
         }
         writer.finish();
         writerDone = true;
     });
 
+    const size_t batchSize = 1024 * 1024; // 1 MB batch size
     uint64_t nonceCounter = 0;
 
-    // Producer: specialized path for encrypted vs unencrypted
-    if (no_encrypt) {
-        UnencryptedProcessor processor;
-        while (!inputFile.eof()) {
-            auto* slot = ringBuffer.getWriteSlot();
-            if (!slot) break;
-            
-            size_t bytesRead = processor.process(inputFile, slot->data(), 0);
-            if (bytesRead > 0) {
-                ringBuffer.commitWrite(bytesRead);
-            }
-        }
-    } else {
-        EncryptedProcessor processor(encryptionKey);
-        while (!inputFile.eof()) {
-            auto* slot = ringBuffer.getWriteSlot();
-            if (!slot) break;
-            
-            size_t bytesRead = processor.process(inputFile, slot->data(), nonceCounter++);
-            if (bytesRead > 0) {
-                ringBuffer.commitWrite(bytesRead);
-            }
+    // Producer: reads input, encrypts (if enabled) and pushes batches
+    while (!generator.isEOF()) {
+        auto encryptedBatch = generator.getEncryptedBatch(batchSize, no_encrypt ? 0 : nonceCounter++);
+        if (!encryptedBatch.empty()) {
+            pixelQueue.push(std::move(encryptedBatch));
         }
     }
-    
-    ringBuffer.setDone();
+    pixelQueue.setDone();
     writerThread.join();
 
     Logger::Log(LOG_DEBUG, "File processing completed.");
