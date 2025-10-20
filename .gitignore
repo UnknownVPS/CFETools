@@ -2,3 +2,9 @@ cfx*
 .vscode
 *.o
 *.a
+build-temp/
+zstd*
+xz*
+lz4*
+zlib*
+lib*

@@ -3,80 +3,58 @@ CXX = g++
 WIN_CXX = x86_64-w64-mingw32-g++
 ANDROID_NDK = /home/codespace/android-ndk-r27c
 ANDROID_CXX = $(ANDROID_NDK)/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang++
-# Add C compilers for building C-based compressor libs
 ANDROID_CC = $(ANDROID_NDK)/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang
 WIN_CC = x86_64-w64-mingw32-gcc
 
-# === Libsodium paths ===
-LIBSODIUM_ROOT = ./libsodium-android
-LIBSODIUM_WIN_ROOT = ./libsodium-win
-LIBSODIUM_INCLUDE = $(LIBSODIUM_ROOT)/include
-LIBSODIUM_LIB = $(LIBSODIUM_ROOT)/lib
-LIBSODIUM_WIN_INCLUDE = $(LIBSODIUM_WIN_ROOT)/include
-LIBSODIUM_WIN_LIB = $(LIBSODIUM_WIN_ROOT)/lib
+# === NDK tools ===
+ANDROID_AR = $(ANDROID_NDK)/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar
+ANDROID_RANLIB = $(ANDROID_NDK)/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ranlib
+ANDROID_STRIP = $(ANDROID_NDK)/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip
 
-# === Compressor versions, paths ===
+# === Prebuilt library paths ===
+LIBS_ROOT = ./libs
+LINUX_LIBS = $(LIBS_ROOT)/linux
+WIN_LIBS = $(LIBS_ROOT)/windows
+ANDROID_LIBS = $(LIBS_ROOT)/android
+
+# === Library versions ===
+LIBSODIUM_VER = 1.0.20
 LZ4_VER = 1.10.0
 ZSTD_VER = 1.5.7
 XZ_VER = 5.8.1
+LIBZIP_VER = 1.11.4
+ZLIB_VER = 1.3.1
 
-LZ4_TARBALL = lz4-$(LZ4_VER).tar.gz
-ZSTD_TARBALL = zstd-$(ZSTD_VER).tar.gz
-XZ_TARBALL = xz-$(XZ_VER).tar.gz
-
-LZ4_DIR = lz4-$(LZ4_VER)
-ZSTD_DIR = zstd-$(ZSTD_VER)
-XZ_DIR = xz-$(XZ_VER)
-
-# Android install roots
-LZ4_ANDROID_ROOT = ./lz4-android
-ZSTD_ANDROID_ROOT = ./zstd-android
-XZ_ANDROID_ROOT = ./xz-android
-LZ4_ANDROID_INCLUDE = $(LZ4_ANDROID_ROOT)/include
-ZSTD_ANDROID_INCLUDE = $(ZSTD_ANDROID_ROOT)/include
-XZ_ANDROID_INCLUDE = $(XZ_ANDROID_ROOT)/include
-LZ4_ANDROID_LIB = $(LZ4_ANDROID_ROOT)/lib
-ZSTD_ANDROID_LIB = $(ZSTD_ANDROID_ROOT)/lib
-XZ_ANDROID_LIB = $(XZ_ANDROID_ROOT)/lib
-
-# Windows install roots
-LZ4_WIN_ROOT = ./lz4-win
-ZSTD_WIN_ROOT = ./zstd-win
-XZ_WIN_ROOT = ./xz-win
-LZ4_WIN_INCLUDE = $(LZ4_WIN_ROOT)/include
-ZSTD_WIN_INCLUDE = $(ZSTD_WIN_ROOT)/include
-XZ_WIN_INCLUDE = $(XZ_WIN_ROOT)/include
-LZ4_WIN_LIB = $(LZ4_WIN_ROOT)/lib
-ZSTD_WIN_LIB = $(ZSTD_WIN_ROOT)/lib
-XZ_WIN_LIB = $(XZ_WIN_ROOT)/lib
+# === Include paths (pointing to unified include dir per platform)===
+LINUX_INCLUDES = -I$(LINUX_LIBS)/include
+WIN_INCLUDES = -I$(WIN_LIBS)/include
+ANDROID_INCLUDES = -I$(ANDROID_LIBS)/include
 
 # === Compiler flags ===
-COMPILE_FLAGS = -Wall -std=c++23 -O3 -pthread -DUSE_LZ4 -DUSE_ZSTD -DUSE_LIBLZMA
-LINK_FLAGS = -lsodium -flto -pthread -llz4 -lzstd -llzma -static
-ANDROID_COMPILE_FLAGS = $(COMPILE_FLAGS) -I$(LIBSODIUM_INCLUDE) -I$(LZ4_ANDROID_INCLUDE) -I$(ZSTD_ANDROID_INCLUDE) -I$(XZ_ANDROID_INCLUDE)
-# Example: static for compressors only, dynamic for system libs
-ANDROID_LINK_FLAGS = -L$(LIBSODIUM_LIB) -L$(LZ4_ANDROID_LIB) -L$(ZSTD_ANDROID_LIB) -L$(XZ_ANDROID_LIB) -Wl,-Bstatic -llz4 -lzstd -llzma -Wl,-Bdynamic -lsodium -static-libstdc++
-WIN_COMPILE_FLAGS = $(COMPILE_FLAGS) -I$(LIBSODIUM_WIN_INCLUDE) -I$(LZ4_WIN_INCLUDE) -I$(ZSTD_WIN_INCLUDE) -I$(XZ_WIN_INCLUDE) --static
-WIN_LINK_FLAGS = -L$(LIBSODIUM_WIN_LIB) -L$(LZ4_WIN_LIB) -L$(ZSTD_WIN_LIB) -L$(XZ_WIN_LIB) -lsodium -llz4 -lzstd -llzma -static-libstdc++ -static-libgcc --static
+COMPILE_FLAGS = -Wall -std=c++23 -O3 -pthread -DUSE_LZ4 -DUSE_ZSTD -DUSE_LIBLZMA $(LINUX_INCLUDES)
+LINUX_LINK_FLAGS = -L$(LINUX_LIBS) -static -lsodium -lzip -flto -pthread -llz4 -lzstd -llzma -lz
+WIN_COMPILE_FLAGS = -Wall -std=c++23 -O3 -pthread -DUSE_LZ4 -DUSE_ZSTD -DUSE_LIBLZMA -DWIN32 $(WIN_INCLUDES)
+WIN_LINK_FLAGS = -L$(WIN_LIBS) -static -lsodium -llz4 -lzstd -llzma -lzip -lz
+ANDROID_COMPILE_FLAGS = -Wall -std=c++23 -O3 -pthread -DUSE_LZ4 -DUSE_ZSTD -DUSE_LIBLZMA -D__ANDROID__ $(ANDROID_INCLUDES)
+ANDROID_LINK_FLAGS = -L$(ANDROID_LIBS) -static -lsodium -llz4 -lzstd -llzma -lzip -lz
 
 # === Targets ===
 TARGET = cfx
 WIN_TARGET = $(TARGET)-windows.exe
 ANDROID_TARGET = $(TARGET)-android
-VERSION_FILE = version.h
 
-# === Source and object files ===
+# === Source files ===
 SRCS = utils/userinput/user_input.cpp \
        utils/bmp/writer/bmp_writer.cpp \
        utils/bmp/reader/bmp_reader.cpp \
        func/img_creation/create_img.cpp \
        func/file_creation/create_file.cpp \
-	   func/patch_creation/patch.cpp \
+       func/patch_creation/patch.cpp \
        utils/logger/logger.cpp \
        func/folder_packer/folder_packer.cpp \
        utils/compress/compress.cpp \
        utils/compress/decompress.cpp \
-	   utils/aio/aio_header.cpp \
+       utils/aio/aio_header.cpp \
        main.cpp
 
 OBJS = $(SRCS:.cpp=.o)
@@ -84,19 +62,19 @@ WIN_OBJS = $(SRCS:.cpp=.win.o)
 ANDROID_OBJS = $(SRCS:.cpp=.android.o)
 
 # === Default build ===
-all: $(TARGET)
+all: check-libs-linux $(TARGET)
 
 $(TARGET): $(OBJS)
 	@echo "Linking $@"
-	$(CXX) -o $@ $^ $(LINK_FLAGS)
+	$(CXX) -o $@ $^ $(LINUX_LINK_FLAGS)
 
-windows: check-libsodium-win check-compressors-win $(WIN_TARGET)
+windows: check-libs-win $(WIN_TARGET)
 
 $(WIN_TARGET): $(WIN_OBJS)
 	@echo "Linking $@"
 	$(WIN_CXX) -o $@ $^ $(WIN_LINK_FLAGS)
 
-android: check-libsodium check-compressors-android $(ANDROID_TARGET)
+android: check-libs-android $(ANDROID_TARGET)
 
 $(ANDROID_TARGET): $(ANDROID_OBJS)
 	@echo "Linking $@"
@@ -122,170 +100,451 @@ dist:
 	$(MAKE) windows
 	$(MAKE) android
 
-$(VERSION_FILE):
-	@echo "Generating version header..."
-	@VERSION=$$(date +%y%m.%d.%H); \
-	echo "#ifndef VERSION_H" > $(VERSION_FILE); \
-	echo "#define VERSION_H" >> $(VERSION_FILE); \
-	echo "#define VERSION \"$$VERSION\"" >> $(VERSION_FILE); \
-	echo "#endif" >> $(VERSION_FILE)
+# === Build ALL static libraries for ALL platforms ===
+build-all-libs: build-libs-linux build-libs-windows build-libs-android
+	@echo "All static libraries built successfully!"
 
-# === Build compressors (Android) ===
-build-compressors-android:
-	@echo "Building LZ4, Zstandard, and XZ (liblzma) for Android..."
-	@if [ ! -f "$(LZ4_TARBALL)" ]; then \
-		wget -O $(LZ4_TARBALL) https://github.com/lz4/lz4/archive/refs/tags/v$(LZ4_VER).tar.gz; \
+# ========================================
+# === BUILD STATIC LIBRARIES - LINUX ===
+# ========================================
+build-libs-linux: setup-lib-dirs
+	@echo "========================================="
+	@echo "Building static libraries for Linux..."
+	@echo "========================================="
+	@$(MAKE) build-libsodium-linux
+	@$(MAKE) build-lz4-linux
+	@$(MAKE) build-zstd-linux
+	@$(MAKE) build-xz-linux
+	@$(MAKE) build-zlib-linux
+	@$(MAKE) build-libzip-linux
+
+build-libsodium-linux:
+	@echo "\n--- Building libsodium (static) for Linux ---"
+	@if [ ! -f "libsodium-$(LIBSODIUM_VER).tar.gz" ]; then \
+		wget https://github.com/jedisct1/libsodium/releases/download/$(LIBSODIUM_VER)-RELEASE/libsodium-$(LIBSODIUM_VER).tar.gz; \
 	fi
-	@if [ ! -d "$(LZ4_DIR)" ]; then tar -xzf $(LZ4_TARBALL); fi
-	@mkdir -p $(LZ4_ANDROID_INCLUDE) $(LZ4_ANDROID_LIB)
-	@$(MAKE) -C $(LZ4_DIR)/lib clean
-	@CC="$(ANDROID_CC)" AR="$(ANDROID_NDK)/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar" RANLIB="$(ANDROID_NDK)/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ranlib" \
-		$(MAKE) -C $(LZ4_DIR)/lib liblz4.a
-	@cp $(LZ4_DIR)/lib/liblz4.a $(LZ4_ANDROID_LIB)/
-	@cp $(LZ4_DIR)/lib/*.h $(LZ4_ANDROID_INCLUDE)/
+	@rm -rf libsodium-$(LIBSODIUM_VER)
+	@tar -xzf libsodium-$(LIBSODIUM_VER).tar.gz
+	@cd libsodium-$(LIBSODIUM_VER) && \
+		./configure --prefix=$(PWD)/build-temp/linux/libsodium --enable-static --disable-shared && \
+		make clean && make -j4 && make install
+	@mkdir -p $(LINUX_LIBS)/include
+	@cp build-temp/linux/libsodium/lib/libsodium.a $(LINUX_LIBS)/
+	@cp -r build-temp/linux/libsodium/include/* $(LINUX_LIBS)/include/
+	@echo "✓ libsodium.a and headers copied to $(LINUX_LIBS)"
 
-	@if [ ! -f "$(ZSTD_TARBALL)" ]; then \
-		wget -O $(ZSTD_TARBALL) https://github.com/facebook/zstd/releases/download/v$(ZSTD_VER)/zstd-$(ZSTD_VER).tar.gz; \
+build-lz4-linux:
+	@echo "\n--- Building LZ4 (static) for Linux ---"
+	@if [ ! -f "lz4-$(LZ4_VER).tar.gz" ]; then \
+		wget -O lz4-$(LZ4_VER).tar.gz https://github.com/lz4/lz4/archive/refs/tags/v$(LZ4_VER).tar.gz; \
 	fi
-	@if [ ! -d "$(ZSTD_DIR)" ]; then tar -xzf $(ZSTD_TARBALL); fi
-	@$(MAKE) -C $(ZSTD_DIR)/lib clean
-	@mkdir -p $(ZSTD_ANDROID_ROOT)
-	@CC="$(ANDROID_CC)" AR="$(ANDROID_NDK)/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar" RANLIB="$(ANDROID_NDK)/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ranlib" \
-		$(MAKE) -C $(ZSTD_DIR)/lib install PREFIX=$(PWD)/$(ZSTD_ANDROID_ROOT)
+	@rm -rf lz4-$(LZ4_VER)
+	@tar -xzf lz4-$(LZ4_VER).tar.gz
+	@$(MAKE) -C lz4-$(LZ4_VER)/lib clean
+	@$(MAKE) -C lz4-$(LZ4_VER)/lib liblz4.a
+	@mkdir -p build-temp/linux/lz4/include build-temp/linux/lz4/lib
+	@cp lz4-$(LZ4_VER)/lib/lz4.h lz4-$(LZ4_VER)/lib/lz4hc.h lz4-$(LZ4_VER)/lib/lz4frame.h build-temp/linux/lz4/include/
+	@cp lz4-$(LZ4_VER)/lib/liblz4.a build-temp/linux/lz4/lib/
+	@mkdir -p $(LINUX_LIBS)/include
+	@cp lz4-$(LZ4_VER)/lib/liblz4.a $(LINUX_LIBS)/
+	@cp -r build-temp/linux/lz4/include/* $(LINUX_LIBS)/include/
+	@echo "✓ liblz4.a and headers copied to $(LINUX_LIBS)"
 
-	@if [ ! -f "$(XZ_TARBALL)" ]; then \
-		wget -O $(XZ_TARBALL) https://github.com/tukaani-project/xz/releases/download/v$(XZ_VER)/xz-$(XZ_VER).tar.gz; \
+build-zstd-linux:
+	@echo "\n--- Building Zstandard (static) for Linux ---"
+	@if [ ! -f "zstd-$(ZSTD_VER).tar.gz" ]; then \
+		wget https://github.com/facebook/zstd/releases/download/v$(ZSTD_VER)/zstd-$(ZSTD_VER).tar.gz; \
 	fi
-	@if [ ! -d "$(XZ_DIR)" ]; then tar -xzf $(XZ_TARBALL); fi
-	@cd $(XZ_DIR) && \
-		CC="$(ANDROID_CC)" AR="$(ANDROID_NDK)/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar" RANLIB="$(ANDROID_NDK)/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ranlib" STRIP="$(ANDROID_NDK)/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip" \
-		./configure --host=aarch64-linux-android --prefix=$(PWD)/$(XZ_ANDROID_ROOT) --disable-shared --enable-static && \
-		$(MAKE) clean && $(MAKE) -j4 && $(MAKE) install
+	@rm -rf zstd-$(ZSTD_VER)
+	@tar -xzf zstd-$(ZSTD_VER).tar.gz
+	@$(MAKE) -C zstd-$(ZSTD_VER)/lib clean
+	@$(MAKE) -C zstd-$(ZSTD_VER)/lib libzstd.a
+	@mkdir -p build-temp/linux/zstd/include build-temp/linux/zstd/lib
+	@cp zstd-$(ZSTD_VER)/lib/zstd.h zstd-$(ZSTD_VER)/lib/zstd_errors.h build-temp/linux/zstd/include/
+	@cp zstd-$(ZSTD_VER)/lib/libzstd.a build-temp/linux/zstd/lib/
+	@mkdir -p $(LINUX_LIBS)/include
+	@cp zstd-$(ZSTD_VER)/lib/libzstd.a $(LINUX_LIBS)/
+	@cp -r build-temp/linux/zstd/include/* $(LINUX_LIBS)/include/
+	@echo "✓ libzstd.a and headers copied to $(LINUX_LIBS)"
 
-# === Build compressors (Windows) ===
-build-compressors-win:
-	@echo "Building LZ4, Zstandard, and XZ (liblzma) for Windows (MinGW)..."
-	@if [ ! -f "$(LZ4_TARBALL)" ]; then \
-		wget -O $(LZ4_TARBALL) https://github.com/lz4/lz4/archive/refs/tags/v$(LZ4_VER).tar.gz; \
+build-xz-linux:
+	@echo "\n--- Building XZ Utils (static) for Linux ---"
+	@if [ ! -f "xz-$(XZ_VER).tar.gz" ]; then \
+		wget https://github.com/tukaani-project/xz/releases/download/v$(XZ_VER)/xz-$(XZ_VER).tar.gz; \
 	fi
-	@if [ ! -d "$(LZ4_DIR)" ]; then tar -xzf $(LZ4_TARBALL); fi
-	@mkdir -p $(LZ4_WIN_INCLUDE) $(LZ4_WIN_LIB)
-	@$(MAKE) -C $(LZ4_DIR)/lib clean
-	@CC="$(WIN_CC)" AR="x86_64-w64-mingw32-ar" RANLIB="x86_64-w64-mingw32-ranlib" \
-		$(MAKE) -C $(LZ4_DIR)/lib liblz4.a
-	@cp $(LZ4_DIR)/lib/liblz4.a $(LZ4_WIN_LIB)/
-	@cp $(LZ4_DIR)/lib/*.h $(LZ4_WIN_INCLUDE)/
+	@rm -rf xz-$(XZ_VER)
+	@tar -xzf xz-$(XZ_VER).tar.gz
+	@cd xz-$(XZ_VER) && \
+		./configure --prefix=$(PWD)/build-temp/linux/xz --enable-static --disable-shared && \
+		make clean && make -j4 && make install
+	@mkdir -p $(LINUX_LIBS)/include
+	@cp build-temp/linux/xz/lib/liblzma.a $(LINUX_LIBS)/
+	@cp -r build-temp/linux/xz/include/* $(LINUX_LIBS)/include/
+	@echo "✓ liblzma.a and headers copied to $(LINUX_LIBS)"
 
-	@if [ ! -f "$(ZSTD_TARBALL)" ]; then \
-		wget -O $(ZSTD_TARBALL) https://github.com/facebook/zstd/releases/download/v$(ZSTD_VER)/zstd-$(ZSTD_VER).tar.gz; \
+build-zlib-linux:
+	@echo "\n--- Building zlib (static) for Linux ---"
+	@if [ ! -f "zlib-$(ZLIB_VER).tar.gz" ]; then \
+		wget https://github.com/madler/zlib/releases/download/v$(ZLIB_VER)/zlib-$(ZLIB_VER).tar.gz; \
 	fi
-	@if [ ! -d "$(ZSTD_DIR)" ]; then tar -xzf $(ZSTD_TARBALL); fi
-	@$(MAKE) -C $(ZSTD_DIR)/lib clean
-	@mkdir -p $(ZSTD_WIN_ROOT)
-	@CC="$(WIN_CC)" AR="x86_64-w64-mingw32-ar" RANLIB="x86_64-w64-mingw32-ranlib" \
-		$(MAKE) -C $(ZSTD_DIR)/lib install PREFIX=$(PWD)/$(ZSTD_WIN_ROOT)
+	@rm -rf zlib-$(ZLIB_VER)
+	@tar -xzf zlib-$(ZLIB_VER).tar.gz
+	@cd zlib-$(ZLIB_VER) && \
+		./configure --prefix=$(PWD)/build-temp/linux/zlib --static && \
+		make clean && make -j4 && make install
+	@mkdir -p $(LINUX_LIBS)/include
+	@cp build-temp/linux/zlib/lib/libz.a $(LINUX_LIBS)/
+	@cp -r build-temp/linux/zlib/include/* $(LINUX_LIBS)/include/
+	@echo "✓ libz.a and headers copied to $(LINUX_LIBS)"
 
-	@if [ ! -f "$(XZ_TARBALL)" ]; then \
-		wget -O $(XZ_TARBALL) https://tukaani.org/xz/xz-$(XZ_VER).tar.gz || wget -O $(XZ_TARBALL) https://github.com/tukaani-project/xz/releases/download/v$(XZ_VER)/xz-$(XZ_VER).tar.gz; \
+build-libzip-linux:
+	@echo "\n--- Building libzip (static) for Linux ---"
+	@if [ ! -f "libzip-$(LIBZIP_VER).tar.gz" ]; then \
+		wget https://libzip.org/download/libzip-$(LIBZIP_VER).tar.gz; \
 	fi
-	@if [ ! -d "$(XZ_DIR)" ]; then tar -xzf $(XZ_TARBALL); fi
-	@cd $(XZ_DIR) && \
-		./configure --host=x86_64-w64-mingw32 --prefix=$(PWD)/$(XZ_WIN_ROOT) --disable-shared --enable-static && \
-		$(MAKE) clean && $(MAKE) -j4 && $(MAKE) install
+	@rm -rf libzip-$(LIBZIP_VER)
+	@tar -xzf libzip-$(LIBZIP_VER).tar.gz
+	@mkdir -p libzip-$(LIBZIP_VER)/build
+	@cd libzip-$(LIBZIP_VER)/build && \
+		cmake .. \
+			-DCMAKE_INSTALL_PREFIX=$(PWD)/build-temp/linux/libzip \
+			-DZLIB_LIBRARY=$(PWD)/build-temp/linux/zlib/lib/libz.a \
+			-DZLIB_INCLUDE_DIR=$(PWD)/build-temp/linux/zlib/include \
+			-DBUILD_SHARED_LIBS=OFF \
+			-DENABLE_COMMONCRYPTO=OFF \
+			-DENABLE_GNUTLS=OFF \
+			-DENABLE_MBEDTLS=OFF \
+			-DENABLE_OPENSSL=OFF \
+			-DENABLE_WINDOWS_CRYPTO=OFF \
+			-DENABLE_BZIP2=OFF \
+			-DENABLE_LZMA=OFF \
+			-DENABLE_ZSTD=OFF && \
+		make clean && make -j4 && make install
+	@mkdir -p $(LINUX_LIBS)/include
+	@cp build-temp/linux/libzip/lib/libzip.a $(LINUX_LIBS)/
+	@cp -r build-temp/linux/libzip/include/* $(LINUX_LIBS)/include/
+	@echo "✓ libzip.a and headers copied to $(LINUX_LIBS)"
 
-# === Checks ===
-check-libsodium:
-	@if [ ! -d "$(LIBSODIUM_ROOT)" ]; then \
-		echo "Error: libsodium not found for Android. Run 'make install-libsodium' first."; \
+
+# ==========================================
+# === BUILD STATIC LIBRARIES - WINDOWS ===
+# ==========================================
+build-libs-windows: setup-lib-dirs
+	@echo "========================================="
+	@echo "Building static libraries for Windows..."
+	@echo "========================================="
+	@$(MAKE) build-libsodium-windows
+	@$(MAKE) build-lz4-windows
+	@$(MAKE) build-zstd-windows
+	@$(MAKE) build-xz-windows
+	@$(MAKE) build-zlib-windows
+	@$(MAKE) build-libzip-windows
+
+build-libsodium-windows:
+	@echo "\n--- Building libsodium (static) for Windows ---"
+	@if [ ! -f "libsodium-$(LIBSODIUM_VER).tar.gz" ]; then \
+		wget https://github.com/jedisct1/libsodium/releases/download/$(LIBSODIUM_VER)-RELEASE/libsodium-$(LIBSODIUM_VER).tar.gz; \
+	fi
+	@rm -rf libsodium-$(LIBSODIUM_VER)
+	@tar -xzf libsodium-$(LIBSODIUM_VER).tar.gz
+	@cd libsodium-$(LIBSODIUM_VER) && \
+		./configure --host=x86_64-w64-mingw32 --prefix=$(PWD)/build-temp/windows/libsodium --enable-static --disable-shared && \
+		make clean && make -j4 && make install
+	@mkdir -p $(WIN_LIBS)/include
+	@cp build-temp/windows/libsodium/lib/libsodium.a $(WIN_LIBS)/
+	@cp -r build-temp/windows/libsodium/include/* $(WIN_LIBS)/include/
+	@echo "✓ libsodium.a and headers copied to $(WIN_LIBS)"
+
+build-lz4-windows:
+	@echo "\n--- Building LZ4 (static) for Windows ---"
+	@if [ ! -f "lz4-$(LZ4_VER).tar.gz" ]; then \
+		wget -O lz4-$(LZ4_VER).tar.gz https://github.com/lz4/lz4/archive/refs/tags/v$(LZ4_VER).tar.gz; \
+	fi
+	@rm -rf lz4-$(LZ4_VER)
+	@tar -xzf lz4-$(LZ4_VER).tar.gz
+	@CC=$(WIN_CC) AR=x86_64-w64-mingw32-ar RANLIB=x86_64-w64-mingw32-ranlib \
+		$(MAKE) -C lz4-$(LZ4_VER)/lib liblz4.a
+	@mkdir -p build-temp/windows/lz4/include build-temp/windows/lz4/lib
+	@cp lz4-$(LZ4_VER)/lib/lz4.h lz4-$(LZ4_VER)/lib/lz4hc.h lz4-$(LZ4_VER)/lib/lz4frame.h build-temp/windows/lz4/include/
+	@cp lz4-$(LZ4_VER)/lib/liblz4.a build-temp/windows/lz4/lib/
+	@mkdir -p $(WIN_LIBS)/include
+	@cp lz4-$(LZ4_VER)/lib/liblz4.a $(WIN_LIBS)/
+	@cp -r build-temp/windows/lz4/include/* $(WIN_LIBS)/include/
+	@echo "✓ liblz4.a and headers copied to $(WIN_LIBS)"
+
+build-zstd-windows:
+	@echo "\n--- Building Zstandard (static) for Windows ---"
+	@if [ ! -f "zstd-$(ZSTD_VER).tar.gz" ]; then \
+		wget https://github.com/facebook/zstd/releases/download/v$(ZSTD_VER)/zstd-$(ZSTD_VER).tar.gz; \
+	fi
+	@rm -rf zstd-$(ZSTD_VER)
+	@tar -xzf zstd-$(ZSTD_VER).tar.gz
+	@CC=$(WIN_CC) AR=x86_64-w64-mingw32-ar RANLIB=x86_64-w64-mingw32-ranlib \
+		$(MAKE) -C zstd-$(ZSTD_VER)/lib libzstd.a
+	@mkdir -p build-temp/windows/zstd/include build-temp/windows/zstd/lib
+	@cp zstd-$(ZSTD_VER)/lib/zstd.h zstd-$(ZSTD_VER)/lib/zstd_errors.h build-temp/windows/zstd/include/
+	@cp zstd-$(ZSTD_VER)/lib/libzstd.a build-temp/windows/zstd/lib/
+	@mkdir -p $(WIN_LIBS)/include
+	@cp zstd-$(ZSTD_VER)/lib/libzstd.a $(WIN_LIBS)/
+	@cp -r build-temp/windows/zstd/include/* $(WIN_LIBS)/include/
+	@echo "✓ libzstd.a and headers copied to $(WIN_LIBS)"
+
+build-xz-windows:
+	@echo "\n--- Building XZ Utils (static) for Windows ---"
+	@if [ ! -f "xz-$(XZ_VER).tar.gz" ]; then \
+		wget https://github.com/tukaani-project/xz/releases/download/v$(XZ_VER)/xz-$(XZ_VER).tar.gz; \
+	fi
+	@rm -rf xz-$(XZ_VER)
+	@tar -xzf xz-$(XZ_VER).tar.gz
+	@cd xz-$(XZ_VER) && \
+		./configure --host=x86_64-w64-mingw32 --prefix=$(PWD)/build-temp/windows/xz --enable-static --disable-shared && \
+		make clean && make -j4 && make install
+	@mkdir -p $(WIN_LIBS)/include
+	@cp build-temp/windows/xz/lib/liblzma.a $(WIN_LIBS)/
+	@cp -r build-temp/windows/xz/include/* $(WIN_LIBS)/include/
+	@echo "✓ liblzma.a and headers copied to $(WIN_LIBS)"
+
+build-zlib-windows:
+	@echo "\n--- Building zlib (static) for Windows ---"
+	@if [ ! -f "zlib-$(ZLIB_VER).tar.gz" ]; then \
+		wget https://github.com/madler/zlib/releases/download/v$(ZLIB_VER)/zlib-$(ZLIB_VER).tar.gz; \
+	fi
+	@rm -rf zlib-$(ZLIB_VER)
+	@tar -xzf zlib-$(ZLIB_VER).tar.gz
+	@cd zlib-$(ZLIB_VER) && \
+		CC=$(WIN_CC) AR="x86_64-w64-mingw32-ar" RANLIB="x86_64-w64-mingw32-ranlib" \
+		./configure --prefix=$(PWD)/build-temp/windows/zlib --static && \
+		make clean && make -j4 && make install
+	@mkdir -p $(WIN_LIBS)/include
+	@cp build-temp/windows/zlib/lib/libz.a $(WIN_LIBS)/
+	@cp -r build-temp/windows/zlib/include/* $(WIN_LIBS)/include/
+	@echo "✓ libz.a and headers copied to $(WIN_LIBS)"
+
+build-libzip-windows:
+	@echo "\n--- Building libzip (static) for Windows ---"
+	@if [ ! -f "libzip-$(LIBZIP_VER).tar.gz" ]; then \
+		wget https://libzip.org/download/libzip-$(LIBZIP_VER).tar.gz; \
+	fi
+	@rm -rf libzip-$(LIBZIP_VER)
+	@tar -xzf libzip-$(LIBZIP_VER).tar.gz
+	@mkdir -p libzip-$(LIBZIP_VER)/build-win
+	@cd libzip-$(LIBZIP_VER)/build-win && \
+		cmake .. \
+			-DCMAKE_TOOLCHAIN_FILE=$(PWD)/toolchain-mingw64.cmake \
+			-DCMAKE_INSTALL_PREFIX=$(PWD)/build-temp/windows/libzip \
+			-DZLIB_LIBRARY=$(PWD)/build-temp/windows/zlib/lib/libz.a \
+			-DZLIB_INCLUDE_DIR=$(PWD)/build-temp/windows/zlib/include \
+			-DBUILD_SHARED_LIBS=OFF \
+			-DENABLE_COMMONCRYPTO=OFF \
+			-DENABLE_GNUTLS=OFF \
+			-DENABLE_MBEDTLS=OFF \
+			-DENABLE_OPENSSL=OFF \
+			-DENABLE_WINDOWS_CRYPTO=OFF \
+			-DENABLE_BZIP2=OFF \
+			-DENABLE_LZMA=OFF \
+			-DENABLE_ZSTD=OFF && \
+		make clean && make -j4 && make install
+	@mkdir -p $(WIN_LIBS)/include
+	@cp build-temp/windows/libzip/lib/libzip.a $(WIN_LIBS)/
+	@cp -r build-temp/windows/libzip/include/* $(WIN_LIBS)/include/
+	@echo "✓ libzip.a and headers copied to $(WIN_LIBS)"
+
+# ==========================================
+# === BUILD STATIC LIBRARIES - ANDROID ===
+# ==========================================
+build-libs-android: setup-lib-dirs
+	@echo "========================================="
+	@echo "Building static libraries for Android..."
+	@echo "========================================="
+	@$(MAKE) build-libsodium-android
+	@$(MAKE) build-lz4-android
+	@$(MAKE) build-zstd-android
+	@$(MAKE) build-xz-android
+	@$(MAKE) build-zlib-android
+	@$(MAKE) build-libzip-android
+
+build-libsodium-android:
+	@echo "\n--- Building libsodium (static) for Android ---"
+	@if [ ! -f "libsodium-$(LIBSODIUM_VER).tar.gz" ]; then \
+		wget https://github.com/jedisct1/libsodium/releases/download/$(LIBSODIUM_VER)-RELEASE/libsodium-$(LIBSODIUM_VER).tar.gz; \
+	fi
+	@rm -rf libsodium-$(LIBSODIUM_VER)
+	@tar -xzf libsodium-$(LIBSODIUM_VER).tar.gz
+	@cd libsodium-$(LIBSODIUM_VER) && \
+		CC=$(ANDROID_CC) AR=$(ANDROID_AR) RANLIB=$(ANDROID_RANLIB) STRIP=$(ANDROID_STRIP) \
+		./configure --host=aarch64-linux-android --prefix=$(PWD)/build-temp/android/libsodium --enable-static --disable-shared && \
+		make clean && make -j4 && make install
+	@mkdir -p $(ANDROID_LIBS)/include
+	@cp build-temp/android/libsodium/lib/libsodium.a $(ANDROID_LIBS)/
+	@cp -r build-temp/android/libsodium/include/* $(ANDROID_LIBS)/include/
+	@echo "✓ libsodium.a and headers copied to $(ANDROID_LIBS)"
+
+build-lz4-android:
+	@echo "\n--- Building LZ4 (static) for Android ---"
+	@if [ ! -f "lz4-$(LZ4_VER).tar.gz" ]; then \
+		wget -O lz4-$(LZ4_VER).tar.gz https://github.com/lz4/lz4/archive/refs/tags/v$(LZ4_VER).tar.gz; \
+	fi
+	@rm -rf lz4-$(LZ4_VER)
+	@tar -xzf lz4-$(LZ4_VER).tar.gz
+	@CC=$(ANDROID_CC) AR=$(ANDROID_AR) RANLIB=$(ANDROID_RANLIB) \
+		$(MAKE) -C lz4-$(LZ4_VER)/lib liblz4.a
+	@mkdir -p build-temp/android/lz4/include build-temp/android/lz4/lib
+	@cp lz4-$(LZ4_VER)/lib/lz4.h lz4-$(LZ4_VER)/lib/lz4hc.h lz4-$(LZ4_VER)/lib/lz4frame.h build-temp/android/lz4/include/
+	@cp lz4-$(LZ4_VER)/lib/liblz4.a build-temp/android/lz4/lib/
+	@mkdir -p $(ANDROID_LIBS)/include
+	@cp lz4-$(LZ4_VER)/lib/liblz4.a $(ANDROID_LIBS)/
+	@cp -r build-temp/android/lz4/include/* $(ANDROID_LIBS)/include/
+	@echo "✓ liblz4.a and headers copied to $(ANDROID_LIBS)"
+
+build-zstd-android:
+	@echo "\n--- Building Zstandard (static) for Android ---"
+	@if [ ! -f "zstd-$(ZSTD_VER).tar.gz" ]; then \
+		wget https://github.com/facebook/zstd/releases/download/v$(ZSTD_VER)/zstd-$(ZSTD_VER).tar.gz; \
+	fi
+	@rm -rf zstd-$(ZSTD_VER)
+	@tar -xzf zstd-$(ZSTD_VER).tar.gz
+	@CC=$(ANDROID_CC) AR=$(ANDROID_AR) RANLIB=$(ANDROID_RANLIB) \
+		$(MAKE) -C zstd-$(ZSTD_VER)/lib libzstd.a
+	@mkdir -p build-temp/android/zstd/include build-temp/android/zstd/lib
+	@cp zstd-$(ZSTD_VER)/lib/zstd.h zstd-$(ZSTD_VER)/lib/zstd_errors.h build-temp/android/zstd/include/
+	@cp zstd-$(ZSTD_VER)/lib/libzstd.a build-temp/android/zstd/lib/
+	@mkdir -p $(ANDROID_LIBS)/include
+	@cp zstd-$(ZSTD_VER)/lib/libzstd.a $(ANDROID_LIBS)/
+	@cp -r build-temp/android/zstd/include/* $(ANDROID_LIBS)/include/
+	@echo "✓ libzstd.a and headers copied to $(ANDROID_LIBS)"
+
+build-xz-android:
+	@echo "\n--- Building XZ Utils (static) for Android ---"
+	@if [ ! -f "xz-$(XZ_VER).tar.gz" ]; then \
+		wget https://github.com/tukaani-project/xz/releases/download/v$(XZ_VER)/xz-$(XZ_VER).tar.gz; \
+	fi
+	@rm -rf xz-$(XZ_VER)
+	@tar -xzf xz-$(XZ_VER).tar.gz
+	@cd xz-$(XZ_VER) && \
+		CC=$(ANDROID_CC) AR=$(ANDROID_AR) RANLIB=$(ANDROID_RANLIB) STRIP=$(ANDROID_STRIP) \
+		./configure --host=aarch64-linux-android --prefix=$(PWD)/build-temp/android/xz --enable-static --disable-shared && \
+		make clean && make -j4 && make install
+	@mkdir -p $(ANDROID_LIBS)/include
+	@cp build-temp/android/xz/lib/liblzma.a $(ANDROID_LIBS)/
+	@cp -r build-temp/android/xz/include/* $(ANDROID_LIBS)/include/
+	@echo "✓ liblzma.a and headers copied to $(ANDROID_LIBS)"
+
+build-zlib-android:
+	@echo "\n--- Building zlib (static) for Android ---"
+	@if [ ! -f "zlib-$(ZLIB_VER).tar.gz" ]; then \
+		wget https://github.com/madler/zlib/releases/download/v$(ZLIB_VER)/zlib-$(ZLIB_VER).tar.gz; \
+	fi
+	@rm -rf zlib-$(ZLIB_VER)
+	@tar -xzf zlib-$(ZLIB_VER).tar.gz
+	@cd zlib-$(ZLIB_VER) && \
+		CC=$(ANDROID_CC) AR=$(ANDROID_AR) RANLIB=$(ANDROID_RANLIB) \
+		./configure --prefix=$(PWD)/build-temp/android/zlib --static && \
+		make clean && make -j4 && make install
+	@mkdir -p $(ANDROID_LIBS)/include
+	@cp build-temp/android/zlib/lib/libz.a $(ANDROID_LIBS)/
+	@cp -r build-temp/android/zlib/include/* $(ANDROID_LIBS)/include/
+	@echo "✓ libz.a and headers copied to $(ANDROID_LIBS)"
+
+build-libzip-android:
+	@echo "\n--- Building libzip (static) for Android ---"
+	@if [ ! -f "libzip-$(LIBZIP_VER).tar.gz" ]; then \
+		wget https://libzip.org/download/libzip-$(LIBZIP_VER).tar.gz; \
+	fi
+	@rm -rf libzip-$(LIBZIP_VER)
+	@tar -xzf libzip-$(LIBZIP_VER).tar.gz
+	@mkdir -p libzip-$(LIBZIP_VER)/build-android
+	@cd libzip-$(LIBZIP_VER)/build-android && \
+		cmake .. \
+			-DCMAKE_TOOLCHAIN_FILE=$(ANDROID_NDK)/build/cmake/android.toolchain.cmake \
+			-DANDROID_ABI=arm64-v8a \
+			-DANDROID_PLATFORM=android-21 \
+			-DCMAKE_INSTALL_PREFIX=$(PWD)/build-temp/android/libzip \
+			-DZLIB_LIBRARY=$(PWD)/build-temp/android/zlib/lib/libz.a \
+			-DZLIB_INCLUDE_DIR=$(PWD)/build-temp/android/zlib/include \
+			-DBUILD_SHARED_LIBS=OFF \
+			-DENABLE_COMMONCRYPTO=OFF \
+			-DENABLE_GNUTLS=OFF \
+			-DENABLE_MBEDTLS=OFF \
+			-DENABLE_OPENSSL=OFF \
+			-DENABLE_WINDOWS_CRYPTO=OFF \
+			-DENABLE_BZIP2=OFF \
+			-DENABLE_LZMA=OFF \
+			-DENABLE_ZSTD=OFF && \
+		make clean && make -j4 && make install
+	@mkdir -p $(ANDROID_LIBS)/include
+	@cp build-temp/android/libzip/lib/libzip.a $(ANDROID_LIBS)/
+	@cp -r build-temp/android/libzip/include/* $(ANDROID_LIBS)/include/
+	@echo "✓ libzip.a and headers copied to $(ANDROID_LIBS)"
+
+# === Setup and checks ===
+setup-lib-dirs:
+	@mkdir -p $(LINUX_LIBS) $(WIN_LIBS) $(ANDROID_LIBS)
+	@mkdir -p build-temp/linux build-temp/windows build-temp/android
+
+check-libs-linux:
+	@if [ ! -d "$(LINUX_LIBS)" ] || [ -z "$$(ls -A $(LINUX_LIBS) 2>/dev/null)" ]; then \
+		echo "Error: No libraries found in $(LINUX_LIBS)"; \
+		echo "Run 'make build-libs-linux' first"; \
 		exit 1; \
 	fi
 
-check-libsodium-win:
-	@if [ ! -d "$(LIBSODIUM_WIN_ROOT)" ]; then \
-		echo "Error: libsodium not found for Windows. Run 'make install-libsodium-win' first."; \
+check-libs-win:
+	@if [ ! -d "$(WIN_LIBS)" ] || [ -z "$$(ls -A $(WIN_LIBS) 2>/dev/null)" ]; then \
+		echo "Error: No libraries found in $(WIN_LIBS)"; \
+		echo "Run 'make build-libs-windows' first"; \
 		exit 1; \
 	fi
 
-check-compressors-android:
-	@if [ ! -d "$(LZ4_ANDROID_LIB)" ] || [ ! -d "$(ZSTD_ANDROID_LIB)" ] || [ ! -d "$(XZ_ANDROID_LIB)" ]; then \
-		echo "Error: Android compressors not found. Run 'make build-compressors-android' first."; \
+check-libs-android:
+	@if [ ! -d "$(ANDROID_LIBS)" ] || [ -z "$$(ls -A $(ANDROID_LIBS) 2>/dev/null)" ]; then \
+		echo "Error: No libraries found in $(ANDROID_LIBS)"; \
+		echo "Run 'make build-libs-android' first"; \
 		exit 1; \
-	fi
-
-check-compressors-win:
-	@if [ ! -d "$(LZ4_WIN_LIB)" ] || [ ! -d "$(ZSTD_WIN_LIB)" ] || [ ! -d "$(XZ_WIN_LIB)" ]; then \
-		echo "Error: Windows compressors not found. Run 'make build-compressors-win' first."; \
-		exit 1; \
-	fi
-
-# === Install libsodium ===
-install-libsodium:
-	@echo "Building libsodium for Android..."
-	@if [ ! -f "libsodium-1.0.20.tar.gz" ]; then \
-		wget https://github.com/jedisct1/libsodium/releases/download/1.0.20-RELEASE/libsodium-1.0.20.tar.gz; \
-	fi
-	@if [ ! -d "libsodium-1.0.20" ]; then \
-		tar -xzf libsodium-1.0.20.tar.gz; \
-	fi
-	@if [ ! -d "$(LIBSODIUM_ROOT)" ]; then \
-		cd libsodium-1.0.20 && \
-		export CC="$(ANDROID_CXX)" && \
-		export CXX="$(ANDROID_CXX)" && \
-		export AR="$(ANDROID_NDK)/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar" && \
-		export STRIP="$(ANDROID_NDK)/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip" && \
-		export RANLIB="$(ANDROID_NDK)/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ranlib" && \
-		./configure \
-			--host=aarch64-linux-android \
-			--prefix=$(PWD)/libsodium-android \
-			--disable-shared --enable-static \
-			--disable-pie --enable-minimal && \
-		make clean && make -j4 && make install; \
-	fi
-
-install-libsodium-win:
-	@echo "Building libsodium for Windows..."
-	@if [ ! -f "libsodium-1.0.20.tar.gz" ]; then \
-		wget https://github.com/jedisct1/libsodium/releases/download/1.0.20-RELEASE/libsodium-1.0.20.tar.gz; \
-	fi
-	@if [ ! -d "libsodium-1.0.20" ]; then \
-		tar -xzf libsodium-1.0.20.tar.gz; \
-	fi
-	@if [ ! -d "$(LIBSODIUM_WIN_ROOT)" ]; then \
-		cd libsodium-1.0.20 && \
-		./configure \
-			--host=x86_64-w64-mingw32 \
-			--prefix=$(PWD)/libsodium-win \
-			--disable-shared --enable-static && \
-		make clean && make -j4 && make install; \
 	fi
 
 # === Cleanup ===
 clean:
 	rm -f $(TARGET) $(WIN_TARGET) $(ANDROID_TARGET) $(OBJS) $(WIN_OBJS) $(ANDROID_OBJS)
 
-clean-all: clean
-	rm -rf libsodium-1.0.20 libsodium-1.0.20.tar.gz libsodium-android libsodium-win \
-	       $(LZ4_DIR) $(LZ4_TARBALL) $(ZSTD_DIR) $(ZSTD_TARBALL) $(XZ_DIR) $(XZ_TARBALL) \
-	       $(LZ4_ANDROID_ROOT) $(ZSTD_ANDROID_ROOT) $(XZ_ANDROID_ROOT) \
-	       $(LZ4_WIN_ROOT) $(ZSTD_WIN_ROOT) $(XZ_WIN_ROOT)
+clean-libs:
+	rm -rf $(LIBS_ROOT) build-temp
+
+clean-downloads:
+	rm -rf libsodium-* lz4-* zstd-* xz-* libzip-* zlib-* *.tar.gz
+
+clean-all: clean clean-libs clean-downloads
 
 # === Help ===
 help:
 	@echo "Available targets:"
-	@echo "  all                     - Build Linux version (default)"
-	@echo "  windows                 - Build Windows version"
-	@echo "  android                 - Build Android version"
-	@echo "  dist                    - Build all targets with auto versioning"
-	@echo "  install-libsodium       - Download/build libsodium for Android"
-	@echo "  install-libsodium-win   - Download/build libsodium for Windows"
-	@echo "  build-compressors-android - Build LZ4, Zstandard, and XZ (liblzma) for Android"
-	@echo "  build-compressors-win     - Build LZ4, Zstandard, and XZ (liblzma) for Windows (MinGW)"
-	@echo "  clean                   - Remove build files"
-	@echo "  clean-all               - Remove all files including libsodium and compressors"
-	@echo "  help                    - Show this help"
+	@echo ""
+	@echo "Build executables:"
+	@echo "  all                    - Build Linux version"
+	@echo "  windows                - Build Windows version"
+	@echo "  android                - Build Android version"
+	@echo ""
+	@echo "Build libraries (static .a files):"
+	@echo "  build-all-libs         - Build ALL libraries for ALL platforms"
+	@echo "  build-libs-linux       - Build all Linux static libraries"
+	@echo "  build-libs-windows     - Build all Windows static libraries"
+	@echo "  build-libs-android     - Build all Android static libraries"
+	@echo ""
+	@echo "Individual library builds:"
+	@echo "  build-libsodium-linux/windows/android"
+	@echo "  build-lz4-linux/windows/android"
+	@echo "  build-zstd-linux/windows/android"
+	@echo "  build-xz-linux/windows/android"
+	@echo ""
+	@echo "Cleanup:"
+	@echo "  clean                  - Remove build files"
+	@echo "  clean-libs             - Remove built libraries"
+	@echo "  clean-downloads        - Remove downloaded tarballs"
+	@echo "  clean-all              - Remove everything"
 
 # === Phony ===
-.PHONY: all windows android clean clean-all install-libsodium install-libsodium-win \
-        check-libsodium check-libsodium-win help dist \
-        build-compressors-android build-compressors-win \
-        check-compressors-android check-compressors-win
+.PHONY: all windows android clean clean-all clean-libs clean-downloads help \
+        setup-lib-dirs check-libs-linux check-libs-win check-libs-android \
+        build-all-libs build-libs-linux build-libs-windows build-libs-android \
+        build-libsodium-linux build-lz4-linux build-zstd-linux build-xz-linux build-zlib-linux build-libzip-linux \
+        build-libsodium-windows build-lz4-windows build-zstd-windows build-xz-windows build-zlib-windows build-libzip-windows \
+        build-libsodium-android build-lz4-android build-zstd-android build-xz-android build-zlib-android build-libzip-android

@@ -17,7 +17,7 @@ jobs:
       - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential libsodium-dev mingw-w64 gcc-mingw-w64-x86-64 liblz4-dev libzstd-dev liblzma-dev
+          sudo apt-get install -y build-essential unzip libsodium-dev mingw-w64 gcc-mingw-w64-x86-64 liblz4-dev libzstd-dev liblzma-dev
       
       - name: Configure MinGW to use POSIX threads
         run: |
@@ -32,18 +32,9 @@ jobs:
       
       - name: Update Makefile for CI path
         run: sed -i "s|/home/codespace/android-ndk-r27c|$HOME/android-ndk-r27c|g" Makefile
-      
-      - name: Install libsodium for Linux/Android
-        run: make install-libsodium
-      
-      - name: Install libsodium for Windows
-        run: make install-libsodium-win
 
-      - name: Build compressors for Android
-        run: make build-compressors-android
-      
-      - name: Build compressors for Windows
-        run: make build-compressors-win
+      - name: Getting pre-build libs
+        run: wget https//files.unknownvps.eu.org/get/file/libs.zip && unzip libs.zip
 
       - name: Build all distributions
         run: make clean && make dist && mv cfx cfx-linux
