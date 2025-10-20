@@ -34,7 +34,7 @@ jobs:
         run: sed -i "s|/home/codespace/android-ndk-r27c|$HOME/android-ndk-r27c|g" Makefile
 
       - name: Getting pre-build libs
-        run: wget https//files.unknownvps.eu.org/get/file/libs.zip && unzip libs.zip
+        run: wget https://files.unknownvps.eu.org/get/file/libs.zip && unzip libs.zip
 
       - name: Build all distributions
         run: make clean && make dist && mv cfx cfx-linux
