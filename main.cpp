@@ -1,14 +1,14 @@
 #include <iostream>
 #include <string>
 #include <filesystem>
-#include "commands/command_base.h"
-#include "commands/command_loader.h"  // Auto-includes all commands
-#include "commands/args/arg_loader.h" // Auto-includes all arg groups
+#include "cmds/command_base.h"
+#include "cmds/command_loader.h"  // Auto-includes all commands
+#include "cmds/args/arg_loader.h" // Auto-includes all arg groups
 #include "utils/logger/logger.h"
 #include "globals.h"
 #include "version.h"
 
-// Global configuration flags (from your existing code)
+// Global configuration flags
 bool no_encrypt = false;
 bool twofile_system = false; 
 bool grayscale = false;
@@ -61,11 +61,13 @@ void applyGlobalConfig(const CommandContext& ctx) {
     disableHash = ctx.boolFlags.count("skip-hash") || ctx.boolFlags.count("nh");
     shaEnabled = ctx.boolFlags.count("sha") || ctx.boolFlags.count("sha256");
     crcEnabled = ctx.boolFlags.count("crc") || ctx.boolFlags.count("crc32");
+    save_path = ctx.flags.count("save-path") ? ctx.flags.at("save-path") :
+                (ctx.flags.count("sp") ? ctx.flags.at("sp") : save_path);
 }
 
 // Show help for all commands
 void showHelp() {
-    Logger::Log(LOG_INFO, "CFET-Tools - Comprehensive File Encoding Tools");
+    Logger::Log(LOG_INFO, "CFETools - Comprehensive File Encoding Tools");
     Logger::Log(LOG_INFO, "");
     Logger::Log(LOG_INFO, "COMMANDS:");
     
@@ -125,27 +127,7 @@ int main(int argc, char* argv[]) {
             break;
         }
     }
-    
-    // Setup working directory
-    const char* home;
-    #ifdef _WIN32
-        home = std::getenv("USERPROFILE");
-    #else
-        home = std::getenv("HOME");
-    #endif
-    
-    if (home != nullptr) {
-        std::filesystem::path tool_dir(home);
-        tool_dir /= "CFET-Tools";
-        if (!std::filesystem::exists(tool_dir)) {
-            std::filesystem::create_directory(tool_dir);
-        }
-        save_path = tool_dir.string();
-    } else {
-        Logger::Log(LOG_ERROR, "Cannot determine home directory");
-        return 1;
-    }
-    
+
     // Show help if no command
     if (argc < 2) {
         showHelp();
@@ -174,7 +156,31 @@ int main(int argc, char* argv[]) {
     
     // Apply global configuration
     applyGlobalConfig(ctx);
-    
+    if (save_path.empty()) {
+        Logger::Log(LOG_DEBUG, "Using default save path");
+        
+        // Setup working directory
+        const char* home;
+        #ifdef _WIN32
+            home = std::getenv("USERPROFILE");
+        #else
+            home = std::getenv("HOME");
+        #endif
+        
+        if (home != nullptr) {
+            std::filesystem::path tool_dir(home);
+            tool_dir /= "CFETools";
+            if (!std::filesystem::exists(tool_dir)) {
+                std::filesystem::create_directory(tool_dir);
+            }
+            save_path = tool_dir.string();
+        } else {
+            Logger::Log(LOG_ERROR, "Cannot determine home directory");
+            return 1;
+        }
+    } else {
+        Logger::Log(LOG_INFO, "Save path: " + save_path);
+    }    
     // Show command-specific help if requested
     if (ctx.boolFlags["help"] || ctx.boolFlags["h"]) {
         Logger::Log(LOG_INFO, "Command: " + std::string(cmd->name()));

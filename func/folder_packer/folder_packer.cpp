@@ -1,4 +1,5 @@
 #include "folder_packer.h"
+#include <algorithm>
 
 namespace fs = std::filesystem;
 
@@ -11,13 +12,19 @@ bool pack_folder(const std::string& folderPath, const std::string& packedFilePat
         return false;
     }
 
+    // Canonicalize base folder once for consistent relative path calculation
+    fs::path canonical_folder = fs::canonical(folder);
+
     // Collect all regular files recursively
     std::vector<fs::path> file_paths;
-    for (const auto& p : fs::recursive_directory_iterator(folder)) {
+    for (const auto& p : fs::recursive_directory_iterator(canonical_folder)) {
         if (fs::is_regular_file(p)) {
             file_paths.push_back(p.path());
         }
     }
+
+    // Sort files to ensure consistent ordering across different systems
+    std::sort(file_paths.begin(), file_paths.end());
 
     std::ofstream out(packedFilePath, std::ios::binary);
     if (!out) {
@@ -28,11 +35,13 @@ bool pack_folder(const std::string& folderPath, const std::string& packedFilePat
     const uint32_t file_count = static_cast<uint32_t>(file_paths.size());
     out.write(reinterpret_cast<const char*>(&file_count), sizeof(file_count));
 
-    constexpr size_t buffer_size = 1024 * 1024 * 4; // 1MB buffer
+    constexpr size_t buffer_size = 1024 * 1024 * 4; // 4MB buffer
     std::vector<char> buffer(buffer_size);
 
     for (const fs::path& file_path : file_paths) {
-        std::string relative_path = fs::relative(file_path, folder).string();
+        // Calculate relative path and normalize separators
+        fs::path relative = fs::relative(file_path, canonical_folder);
+        std::string relative_path = relative.generic_string();
 
         uint32_t path_len = static_cast<uint32_t>(relative_path.size());
         out.write(reinterpret_cast<const char*>(&path_len), sizeof(path_len));
@@ -85,7 +94,7 @@ bool unpack_packed_file(const std::string& packedFilePath, const std::string& ou
     }
 
     fs::path unpackedFolderPath(outputFolderPath);
-    constexpr size_t buffer_size = 1024 * 1024 * 4; // 1MB buffer
+    constexpr size_t buffer_size = 1024 * 1024 * 4; // 4MB buffer
     std::vector<char> buffer(buffer_size);
 
     for (uint32_t i = 0; i < file_count; ++i) {

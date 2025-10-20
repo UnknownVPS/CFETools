@@ -43,21 +43,27 @@ Verify if it's working with:
 ## Usage
 ### Encode a file
 ```bash
-./cfx --file path/to/file
+./cfx encode path/to/file
 ```
  
 Encode a file without encryption and a single file (all-in-one mode)
 ```bash
-./cfx -f path/to/file -ne -a
+./cfx encode path/to/file -ne
 ```
--f is shorthand for --file, -ne for --no-encrypt and -a for --aio
+-ne for --no-encrypt
 
 Optionally you can enabled 8-Bit mode using a `-gs` flag
 ### Decode a encoded image
 ```bash
-./cfx -i path/to/image
+./cfx decode path/to/image
 ```
 It will automatically detect the required from the image
+
+### More 
+```bash
+./cfx help
+```
+This will show details of every command
 
 ## License
 
