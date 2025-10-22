@@ -11,3 +11,4 @@
 #include "hash.h"
 #include "diff.h"
 #include "patch.h"
+#include "ztc.h"
