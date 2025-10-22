@@ -33,7 +33,7 @@ public:
         }
         
         std::string output = ctx.args.size() >= 2 ? ctx.args[1] : 
-                             std::filesystem::path(file).filename().string() + ".cfup";
+                             std::filesystem::path(file).filename().stem().string() + ".cfup";
         
         // Build full output path in save_path
         std::filesystem::path packedFilePath = std::filesystem::path(save_path) / output;

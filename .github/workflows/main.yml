@@ -86,7 +86,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GIT_TOKEN }}
         with:
           tag_name: ${{ needs.build.outputs.version }}
-          release_name: "CFET-Tools ${{ needs.build.outputs.version }}"
+          release_name: "CFETools ${{ needs.build.outputs.version }}"
           prerelease: ${{ github.ref_name != 'main' }}
           body: |
             This release includes freshly built binaries for the following platforms:
