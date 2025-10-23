@@ -14,6 +14,7 @@ A compression and file encoding tool written in C++ for speed and security.
 - Fast
 - Cross platform
 - Folders are supported
+- Diff and Patch
 
 
 ## Graphs (Performance)
