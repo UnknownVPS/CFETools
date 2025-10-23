@@ -50,14 +50,28 @@ LZ4_WIN_LIB = $(LZ4_WIN_ROOT)/lib
 ZSTD_WIN_LIB = $(ZSTD_WIN_ROOT)/lib
 XZ_WIN_LIB = $(XZ_WIN_ROOT)/lib
 
+# === Zlib version, paths ===
+ZLIB_VER = 1.3.1
+ZLIB_TARBALL = zlib-$(ZLIB_VER).tar.gz
+ZLIB_DIR = zlib-$(ZLIB_VER)
+
+# Android zlib paths
+ZLIB_ANDROID_ROOT = ./zlib-android
+ZLIB_ANDROID_INCLUDE = $(ZLIB_ANDROID_ROOT)/include
+ZLIB_ANDROID_LIB = $(ZLIB_ANDROID_ROOT)/lib
+
+# Windows zlib paths
+ZLIB_WIN_ROOT = ./zlib-win
+ZLIB_WIN_INCLUDE = $(ZLIB_WIN_ROOT)/include
+ZLIB_WIN_LIB = $(ZLIB_WIN_ROOT)/lib
+
 # === Compiler flags ===
-COMPILE_FLAGS = -Wall -std=c++17 -O3 -pthread -DUSE_LZ4 -DUSE_ZSTD -DUSE_LIBLZMA
-LINK_FLAGS = -lsodium -static-libstdc++ -pthread -llz4 -lzstd -llzma -static
-ANDROID_COMPILE_FLAGS = $(COMPILE_FLAGS) -I$(LIBSODIUM_INCLUDE) -I$(LZ4_ANDROID_INCLUDE) -I$(ZSTD_ANDROID_INCLUDE) -I$(XZ_ANDROID_INCLUDE)
-# Example: static for compressors only, dynamic for system libs
-ANDROID_LINK_FLAGS = -L$(LIBSODIUM_LIB) -L$(LZ4_ANDROID_LIB) -L$(ZSTD_ANDROID_LIB) -L$(XZ_ANDROID_LIB) -Wl,-Bstatic -llz4 -lzstd -llzma -Wl,-Bdynamic -lsodium -static-libstdc++
-WIN_COMPILE_FLAGS = $(COMPILE_FLAGS) -I$(LIBSODIUM_WIN_INCLUDE) -I$(LZ4_WIN_INCLUDE) -I$(ZSTD_WIN_INCLUDE) -I$(XZ_WIN_INCLUDE) --static
-WIN_LINK_FLAGS = -L$(LIBSODIUM_WIN_LIB) -L$(LZ4_WIN_LIB) -L$(ZSTD_WIN_LIB) -L$(XZ_WIN_LIB) -lsodium -llz4 -lzstd -llzma -static-libstdc++ -static-libgcc --static
+COMPILE_FLAGS = -Wall -std=c++23 -O3 -pthread -DUSE_LZ4 -DUSE_ZSTD -DUSE_LIBLZMA
+LINK_FLAGS = -lsodium -flto -pthread -llz4 -lzstd -llzma -lz -static
+ANDROID_COMPILE_FLAGS = $(COMPILE_FLAGS) -I$(LIBSODIUM_INCLUDE) -I$(LZ4_ANDROID_INCLUDE) -I$(ZSTD_ANDROID_INCLUDE) -I$(XZ_ANDROID_INCLUDE) -I$(ZLIB_ANDROID_INCLUDE)
+ANDROID_LINK_FLAGS = -L$(LIBSODIUM_LIB) -L$(LZ4_ANDROID_LIB) -L$(ZSTD_ANDROID_LIB) -L$(XZ_ANDROID_LIB) -L$(ZLIB_ANDROID_LIB) -Wl,-Bstatic -llz4 -lzstd -llzma -lz -Wl,-Bdynamic -lsodium -static-libstdc++
+WIN_COMPILE_FLAGS = $(COMPILE_FLAGS) -I$(LIBSODIUM_WIN_INCLUDE) -I$(LZ4_WIN_INCLUDE) -I$(ZSTD_WIN_INCLUDE) -I$(XZ_WIN_INCLUDE) -I$(ZLIB_WIN_INCLUDE) --static
+WIN_LINK_FLAGS = -L$(LIBSODIUM_WIN_LIB) -L$(LZ4_WIN_LIB) -L$(ZSTD_WIN_LIB) -L$(XZ_WIN_LIB) -L$(ZLIB_WIN_LIB) -lsodium -llz4 -lzstd -llzma -lz -static-libstdc++ -static-libgcc --static
 
 # === Targets ===
 TARGET = cfx
@@ -69,13 +83,14 @@ VERSION_FILE = version.h
 SRCS = utils/userinput/user_input.cpp \
        utils/bmp/writer/bmp_writer.cpp \
        utils/bmp/reader/bmp_reader.cpp \
-       utils/json/json.cpp \
        func/img_creation/create_img.cpp \
        func/file_creation/create_file.cpp \
+	   func/patch_creation/patch.cpp \
        utils/logger/logger.cpp \
        func/folder_packer/folder_packer.cpp \
        utils/compress/compress.cpp \
        utils/compress/decompress.cpp \
+	   utils/aio/aio_header.cpp \
        main.cpp
 
 OBJS = $(SRCS:.cpp=.o)
@@ -114,9 +129,9 @@ $(ANDROID_TARGET): $(ANDROID_OBJS)
 	@echo "Compiling $< for Android"
 	$(ANDROID_CXX) -c $< -o $@ $(ANDROID_COMPILE_FLAGS)
 
-# === Dist build with versioning ===
-dist: $(VERSION_FILE)
-	@echo "Building all targets with versioning..."
+# === Dist build ===
+dist:
+	@echo "Building all targets"
 	$(MAKE) all
 	$(MAKE) windows
 	$(MAKE) android
@@ -161,6 +176,16 @@ build-compressors-android:
 		./configure --host=aarch64-linux-android --prefix=$(PWD)/$(XZ_ANDROID_ROOT) --disable-shared --enable-static && \
 		$(MAKE) clean && $(MAKE) -j4 && $(MAKE) install
 
+	@if [ ! -f "$(ZLIB_TARBALL)" ]; then \
+		wget -O $(ZLIB_TARBALL) https://zlib.net/zlib-$(ZLIB_VER).tar.gz || \
+		wget -O $(ZLIB_TARBALL) https://github.com/madler/zlib/archive/refs/tags/v$(ZLIB_VER).tar.gz; \
+	fi
+	@if [ ! -d "$(ZLIB_DIR)" ]; then tar -xzf $(ZLIB_TARBALL); fi
+	@cd $(ZLIB_DIR) && \
+		CC="$(ANDROID_CC)" AR="$(ANDROID_NDK)/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar" RANLIB="$(ANDROID_NDK)/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ranlib" STRIP="$(ANDROID_NDK)/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip" \
+		./configure --static --prefix=$(PWD)/$(ZLIB_ANDROID_ROOT) && \
+		$(MAKE) clean && $(MAKE) -j4 && $(MAKE) install
+
 # === Build compressors (Windows) ===
 build-compressors-win:
 	@echo "Building LZ4, Zstandard, and XZ (liblzma) for Windows (MinGW)..."
@@ -192,6 +217,16 @@ build-compressors-win:
 		./configure --host=x86_64-w64-mingw32 --prefix=$(PWD)/$(XZ_WIN_ROOT) --disable-shared --enable-static && \
 		$(MAKE) clean && $(MAKE) -j4 && $(MAKE) install
 
+	@if [ ! -f "$(ZLIB_TARBALL)" ]; then \
+		wget -O $(ZLIB_TARBALL) https://zlib.net/zlib-$(ZLIB_VER).tar.gz || \
+		wget -O $(ZLIB_TARBALL) https://github.com/madler/zlib/archive/refs/tags/v$(ZLIB_VER).tar.gz; \
+	fi
+	@if [ ! -d "$(ZLIB_DIR)" ]; then tar -xzf $(ZLIB_TARBALL); fi
+	@cd $(ZLIB_DIR) && \
+		CC="$(WIN_CC)" AR="x86_64-w64-mingw32-ar" RANLIB="x86_64-w64-mingw32-ranlib" STRIP="x86_64-w64-mingw32-strip" \
+		./configure --static --prefix=$(PWD)/$(ZLIB_WIN_ROOT) && \
+		$(MAKE) clean && $(MAKE) -j4 && $(MAKE) install
+
 # === Checks ===
 check-libsodium:
 	@if [ ! -d "$(LIBSODIUM_ROOT)" ]; then \
@@ -206,13 +241,13 @@ check-libsodium-win:
 	fi
 
 check-compressors-android:
-	@if [ ! -d "$(LZ4_ANDROID_LIB)" ] || [ ! -d "$(ZSTD_ANDROID_LIB)" ] || [ ! -d "$(XZ_ANDROID_LIB)" ]; then \
+	@if [ ! -d "$(LZ4_ANDROID_LIB)" ] || [ ! -d "$(ZSTD_ANDROID_LIB)" ] || [ ! -d "$(XZ_ANDROID_LIB)" ] || [ ! -d "$(ZLIB_ANDROID_LIB)" ]; then \
 		echo "Error: Android compressors not found. Run 'make build-compressors-android' first."; \
 		exit 1; \
 	fi
 
 check-compressors-win:
-	@if [ ! -d "$(LZ4_WIN_LIB)" ] || [ ! -d "$(ZSTD_WIN_LIB)" ] || [ ! -d "$(XZ_WIN_LIB)" ]; then \
+	@if [ ! -d "$(LZ4_WIN_LIB)" ] || [ ! -d "$(ZSTD_WIN_LIB)" ] || [ ! -d "$(XZ_WIN_LIB)" ] || [ ! -d "$(ZLIB_WIN_LIB)" ]; then \
 		echo "Error: Windows compressors not found. Run 'make build-compressors-win' first."; \
 		exit 1; \
 	fi
@@ -260,13 +295,13 @@ install-libsodium-win:
 
 # === Cleanup ===
 clean:
-	rm -f $(TARGET) $(WIN_TARGET) $(ANDROID_TARGET) $(OBJS) $(WIN_OBJS) $(ANDROID_OBJS) $(VERSION_FILE)
+	rm -f $(TARGET) $(WIN_TARGET) $(ANDROID_TARGET) $(OBJS) $(WIN_OBJS) $(ANDROID_OBJS)
 
 clean-all: clean
 	rm -rf libsodium-1.0.20 libsodium-1.0.20.tar.gz libsodium-android libsodium-win \
-	       $(LZ4_DIR) $(LZ4_TARBALL) $(ZSTD_DIR) $(ZSTD_TARBALL) $(XZ_DIR) $(XZ_TARBALL) \
-	       $(LZ4_ANDROID_ROOT) $(ZSTD_ANDROID_ROOT) $(XZ_ANDROID_ROOT) \
-	       $(LZ4_WIN_ROOT) $(ZSTD_WIN_ROOT) $(XZ_WIN_ROOT)
+	       $(LZ4_DIR) $(LZ4_TARBALL) $(ZSTD_DIR) $(ZSTD_TARBALL) $(XZ_DIR) $(XZ_TARBALL) $(ZLIB_DIR) $(ZLIB_TARBALL) \
+	       $(LZ4_ANDROID_ROOT) $(ZSTD_ANDROID_ROOT) $(XZ_ANDROID_ROOT) $(ZLIB_ANDROID_ROOT) \
+	       $(LZ4_WIN_ROOT) $(ZSTD_WIN_ROOT) $(XZ_WIN_ROOT) $(ZLIB_WIN_ROOT)
 
 # === Help ===
 help:

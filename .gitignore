@@ -1,10 +1,4 @@
-video.py
-video.mp4
-cfx
-video.bmp
+cfx*
 .vscode
 *.o
-cfx.exe
-video.mtd
-cfx.android
-version.h
+*.a

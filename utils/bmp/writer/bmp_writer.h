@@ -43,6 +43,5 @@ struct BMPInfoHeader {
 #pragma pack(pop)
 
 // Full-featured function with all options
-void writeBMP(const std::string& filename, const std::string& inputFilename, const std::string& encryptionKey, 
-              bool noEncryption, bool grayscaleMode, bool aioMode);
+void writeBMP(const std::string& filename, const std::string& inputFilename, const std::string& encryptionKey);
 #endif // BMP_WRITER_H

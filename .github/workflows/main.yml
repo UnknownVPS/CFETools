@@ -1,7 +1,7 @@
 name: Build Multi-Platform Binaries
 on:
   push:
-    branches: [ main, dev ]
+    branches: [ main, gears ]
   pull_request:
     branches: [ main ]
   workflow_dispatch:
@@ -13,13 +13,6 @@ jobs:
       version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@v4
-      
-      - name: Generate version
-        id: version
-        run: |
-          VERSION="v$(date +'%y%m.%d.%H')"
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "Generated version: $VERSION"
       
       - name: Install build dependencies
         run: |
@@ -55,6 +48,13 @@ jobs:
       - name: Build all distributions
         run: make clean && make dist && mv cfx cfx-linux
       
+      - name: Extract version from Version.h
+        id: version
+        run: |
+          VERSION=v$(grep -E '^#define VERSION "' version.h | cut -d'"' -f2)
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Using version from version.h: $VERSION"
+      
       - name: Upload release artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -68,7 +68,7 @@ jobs:
   create-release:
     needs: [build]
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev'
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/gears'
     steps:
       - name: Download all artifacts
         uses: actions/download-artifact@v4
@@ -79,22 +79,50 @@ jobs:
       - name: Set executable permissions
         run: chmod +x cfx-linux cfx-android
       
-      - name: Create GitHub Release
-        uses: marvinpinto/action-automatic-releases@latest
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GIT_TOKEN }}
         with:
-          repo_token: ${{ secrets.GIT_TOKEN }}
-          automatic_release_tag: ${{ needs.build.outputs.version }}
-          prerelease: false
-          title: "Multi-Platform Build ${{ needs.build.outputs.version }}"
-          files: |
-            cfx-linux
-            cfx-windows.exe
-            cfx-android
+          tag_name: ${{ needs.build.outputs.version }}
+          release_name: "CFETools ${{ needs.build.outputs.version }}"
+          prerelease: ${{ github.ref_name != 'main' }}
           body: |
             This release includes freshly built binaries for the following platforms:
             - **Linux** (`cfx-linux`)
             - **Windows** (`cfx-windows.exe`)
             - **Android** (`cfx-android`)
             
-            Built from the latest commit to `${{ github.ref_name }}` using `make dist`.
+            Built from the [${{ github.sha }}](https://github.com/${{ github.repository }}/commit/${{ github.sha }}) commit to `${{ github.ref_name }}` using `make dist`.
             Version: ${{ needs.build.outputs.version }}
+
+      - name: Upload Linux binary
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GIT_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./cfx-linux
+          asset_name: cfx-linux
+          asset_content_type: application/octet-stream
+
+      - name: Upload Windows binary
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GIT_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./cfx-windows.exe
+          asset_name: cfx-windows.exe
+          asset_content_type: application/octet-stream
+
+      - name: Upload Android binary
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GIT_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./cfx-android
+          asset_name: cfx-android
+          asset_content_type: application/octet-stream

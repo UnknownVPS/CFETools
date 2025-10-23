@@ -3,6 +3,9 @@
 #include "../../utils/json/json.h"
 #include "../../utils/logger/logger.h"
 #include "../../utils/userinput/user_input.h"
+#include "../../globals.h"
+#include "../../version.h"
+#include "../../utils/hashers/fileHasher.hpp"
 #include <random>
 #include <sstream>
 #include <iomanip>
@@ -19,14 +22,19 @@ static std::string deriveKeyBlake2b(const std::string& password) {
     return std::string(reinterpret_cast<char*>(out), sizeof out);
 }
 
-std::string generateRandomKey(size_t length) {
-    std::vector<uint8_t> key(length);
-    randombytes_buf(key.data(), length);
-    return std::string(key.begin(), key.end());
+// Generate 32-byte key and return as hex string
+std::string generateRandomKey() {
+    unsigned char key[crypto_aead_xchacha20poly1305_ietf_KEYBYTES]; // 32 bytes
+    crypto_aead_xchacha20poly1305_ietf_keygen(key);
+
+    // Hex encode
+    char hex[crypto_aead_xchacha20poly1305_ietf_KEYBYTES * 2 + 1];
+    sodium_bin2hex(hex, sizeof hex, key, sizeof key);
+
+    return std::string(hex);
 }
 
-void create_img(const std::string& file_path, const std::string& save_path,
-                bool no_encrypt, bool aio_mode, bool grayscaleMode) {
+void create_img(const std::string& file_path) {
     if (sodium_init() < 0) {
         Logger::Log(LOG_ERROR, "libsodium initialization failed");
         return;
@@ -39,25 +47,43 @@ void create_img(const std::string& file_path, const std::string& save_path,
     std::uintmax_t size = inputFile.tellg();
     inputFile.seekg(0, std::ios::beg);
 
-    Data data;
-    data.original_filename = std::filesystem::path(file_path).filename().string();
-    data.binary_length = (size * 8);
-
+    json_utils::JsonMap data;
+    data["original_filename"] = std::filesystem::path(file_path).filename().string();
+    data["binary_length"] = std::to_string(size * 8);
+    
     std::string encryptionKey;
     if (no_encrypt) {
         encryptionKey.clear();
     } else {
-        // Default (non-AIO): random 32-byte key written to .mtd for compatibility
-        encryptionKey = generateRandomKey(32);
+        // Default (AIO): random 32-byte key written to .mtd for compatibility
+        encryptionKey = generateRandomKey();
     }
-    data.encryption_key = encryptionKey;
-
-    if (!aio_mode) {
+    data["encryption_key"] = encryptionKey;
+    data["v"] = VERSION;
+    data["compress"] = isCompressed ? "true" : "false";
+    data["pack"] = isPacked ? "true" : "false";
+    if (!disableHash && twofile_system) {
+        Logger::StartTimer("xxHash calculation");
+        std::string hash = fileHasher::xxhash_file(file_path);
+        Logger::EndTimer("xxHash calculation", LOG_INFO);
+        data["hash"] = hash;
+    } else {
+        data["hash"] = "";
+    }
+    if (twofile_system) {
+        if (shaEnabled) {
+            std::string sha = fileHasher::hashFileSHA256(file_path);
+            data["SHA"] = sha;
+        }
+        if (crcEnabled) {
+            std::string crc = fileHasher::crc32_file(file_path);
+            data["CRC"] = crc;
+        }
         Logger::Log(LOG_DEBUG, "Writing JSON file.");
-        write_json(save_path + '/' + file_name + ".mtd", data);
+        json_utils::write_json(save_path + '/' + file_name + ".mtd", data);
     }
 
-    if (aio_mode && !no_encrypt) {
+    if (!twofile_system && !no_encrypt) {
         Logger::Log(LOG_INFO, "AIO Mode with Encryption requires a password");
         std::string password;
         Input inputprompt;
@@ -72,6 +98,6 @@ void create_img(const std::string& file_path, const std::string& save_path,
         }
     }
 
-    writeBMP(save_path + "/" + file_name + ".bmp", file_path, encryptionKey, no_encrypt, grayscaleMode, aio_mode);
+    writeBMP(save_path + "/" + file_name + ".bmp", file_path, encryptionKey);
     Logger::Log(LOG_INFO, "Image written successfully!");
 }

@@ -1,7 +1,7 @@
 #pragma once
 
 #include <string>
-
+#include "../logger/logger.h"
 /**
  * Compresses a file using a memory-efficient streaming algorithm.
  * 
@@ -18,3 +18,4 @@ bool compressFile(const std::string& input_file, const std::string& output_file,
  * @param compression_lvl Compression level (1-21).
  * @return Algorithm name as a string.
  */
+std::string getAlgorithmName(int compression_lvl);
