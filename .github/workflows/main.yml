@@ -1,7 +1,7 @@
 name: Build Multi-Platform Binaries
 on:
   push:
-    branches: [ main, gears ]
+    branches: [ main, axle ]
   pull_request:
     branches: [ main ]
   workflow_dispatch:
@@ -68,7 +68,7 @@ jobs:
   create-release:
     needs: [build]
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/gears'
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/axle'
     steps:
       - name: Download all artifacts
         uses: actions/download-artifact@v4
