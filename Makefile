@@ -65,14 +65,6 @@ ZLIB_WIN_ROOT = ./zlib-win
 ZLIB_WIN_INCLUDE = $(ZLIB_WIN_ROOT)/include
 ZLIB_WIN_LIB = $(ZLIB_WIN_ROOT)/lib
 
-# === Compiler flags ===
-COMPILE_FLAGS = -Wall -std=c++23 -O3 -pthread -DUSE_LZ4 -DUSE_ZSTD -DUSE_LIBLZMA
-LINK_FLAGS = -lsodium -flto -pthread -llz4 -lzstd -llzma -lz -static
-ANDROID_COMPILE_FLAGS = $(COMPILE_FLAGS) -I$(LIBSODIUM_INCLUDE) -I$(LZ4_ANDROID_INCLUDE) -I$(ZSTD_ANDROID_INCLUDE) -I$(XZ_ANDROID_INCLUDE) -I$(ZLIB_ANDROID_INCLUDE)
-ANDROID_LINK_FLAGS = -L$(LIBSODIUM_LIB) -L$(LZ4_ANDROID_LIB) -L$(ZSTD_ANDROID_LIB) -L$(XZ_ANDROID_LIB) -L$(ZLIB_ANDROID_LIB) -Wl,-Bstatic -llz4 -lzstd -llzma -lz -Wl,-Bdynamic -lsodium -static-libstdc++
-WIN_COMPILE_FLAGS = $(COMPILE_FLAGS) -I$(LIBSODIUM_WIN_INCLUDE) -I$(LZ4_WIN_INCLUDE) -I$(ZSTD_WIN_INCLUDE) -I$(XZ_WIN_INCLUDE) -I$(ZLIB_WIN_INCLUDE) --static
-WIN_LINK_FLAGS = -L$(LIBSODIUM_WIN_LIB) -L$(LZ4_WIN_LIB) -L$(ZSTD_WIN_LIB) -L$(XZ_WIN_LIB) -L$(ZLIB_WIN_LIB) -lsodium -llz4 -lzstd -llzma -lz -static-libstdc++ -static-libgcc --static
-
 # === Targets ===
 TARGET = cfx
 WIN_TARGET = $(TARGET)-windows.exe
@@ -97,24 +89,134 @@ OBJS = $(SRCS:.cpp=.o)
 WIN_OBJS = $(SRCS:.cpp=.win.o)
 ANDROID_OBJS = $(SRCS:.cpp=.android.o)
 
-# === Default build ===
+# === Libzip version, paths ===
+LIBZIP_VER = 1.10.1
+LIBZIP_TARBALL = libzip-$(LIBZIP_VER).tar.gz
+LIBZIP_DIR = libzip-$(LIBZIP_VER)
+
+# Linux libzip paths
+LIBZIP_LINUX_ROOT = ./libzip-linux
+LIBZIP_LINUX_INCLUDE = $(LIBZIP_LINUX_ROOT)/include
+LIBZIP_LINUX_LIB = $(LIBZIP_LINUX_ROOT)/lib
+
+# Android libzip paths
+LIBZIP_ANDROID_ROOT = ./libzip-android
+LIBZIP_ANDROID_INCLUDE = $(LIBZIP_ANDROID_ROOT)/include
+LIBZIP_ANDROID_LIB = $(LIBZIP_ANDROID_ROOT)/lib
+
+# Windows libzip paths
+LIBZIP_WIN_ROOT = ./libzip-win
+LIBZIP_WIN_INCLUDE = $(LIBZIP_WIN_ROOT)/include
+LIBZIP_WIN_LIB = $(LIBZIP_WIN_ROOT)/lib
+
+# === Updated Compiler flags (add libzip) ===
+COMPILE_FLAGS = -Wall -std=c++23 -O3 -pthread -DUSE_LZ4 -DUSE_ZSTD -DUSE_LIBLZMA -I$(LIBZIP_LINUX_INCLUDE)
+LINK_FLAGS = -L$(LIBZIP_LINUX_LIB) -lsodium -flto -pthread -lzip -llz4 -lzstd -llzma -lz -static
+ANDROID_COMPILE_FLAGS = $(COMPILE_FLAGS) -I$(LIBSODIUM_INCLUDE) -I$(LZ4_ANDROID_INCLUDE) -I$(ZSTD_ANDROID_INCLUDE) -I$(XZ_ANDROID_INCLUDE) -I$(ZLIB_ANDROID_INCLUDE) -I$(LIBZIP_ANDROID_INCLUDE)
+ANDROID_LINK_FLAGS = -L$(LIBSODIUM_LIB) -L$(LZ4_ANDROID_LIB) -L$(ZSTD_ANDROID_LIB) -L$(XZ_ANDROID_LIB) -L$(ZLIB_ANDROID_LIB) -L$(LIBZIP_ANDROID_LIB) -Wl,-Bstatic -llz4 -lzstd -llzma -lz -lzip -Wl,-Bdynamic -lsodium -static-libstdc++
+WIN_COMPILE_FLAGS = $(COMPILE_FLAGS) -I$(LIBSODIUM_WIN_INCLUDE) -I$(LZ4_WIN_INCLUDE) -I$(ZSTD_WIN_INCLUDE) -I$(XZ_WIN_INCLUDE) -I$(ZLIB_WIN_INCLUDE) -I$(LIBZIP_WIN_INCLUDE) --static
+WIN_LINK_FLAGS = -L$(LIBSODIUM_WIN_LIB) -L$(LZ4_WIN_LIB) -L$(ZSTD_WIN_LIB) -L$(XZ_WIN_LIB) -L$(ZLIB_WIN_LIB) -L$(LIBZIP_WIN_LIB) -lsodium -llz4 -lzstd -llzma -lz -lzip -static-libstdc++ -static-libgcc --static
+
+# === Updated targets ===
 all: $(TARGET)
 
 $(TARGET): $(OBJS)
 	@echo "Linking $@"
 	$(CXX) -o $@ $^ $(LINK_FLAGS)
 
-windows: check-libsodium-win check-compressors-win $(WIN_TARGET)
+windows: check-libsodium-win check-compressors-win check-libzip-win $(WIN_TARGET)
 
 $(WIN_TARGET): $(WIN_OBJS)
 	@echo "Linking $@"
 	$(WIN_CXX) -o $@ $^ $(WIN_LINK_FLAGS)
 
-android: check-libsodium check-compressors-android $(ANDROID_TARGET)
+android: check-libsodium check-compressors-android check-libzip-android $(ANDROID_TARGET)
 
 $(ANDROID_TARGET): $(ANDROID_OBJS)
 	@echo "Linking $@"
 	$(ANDROID_CXX) -o $@ $^ $(ANDROID_LINK_FLAGS)
+
+# === Build libzip (Linux) ===
+build-libzip-linux:
+	@echo "Building libzip for Linux..."
+	@if [ ! -f "$(LIBZIP_TARBALL)" ]; then \
+		wget -O $(LIBZIP_TARBALL) https://github.com/nih-at/libzip/releases/download/v$(LIBZIP_VER)/libzip-$(LIBZIP_VER).tar.gz; \
+	fi
+	@if [ ! -d "$(LIBZIP_DIR)" ]; then tar -xzf $(LIBZIP_TARBALL); fi
+	@mkdir -p $(LIBZIP_DIR)/build
+	@cd $(LIBZIP_DIR)/build && \
+		cmake .. -DCMAKE_BUILD_TYPE=Release \
+			-DCMAKE_INSTALL_PREFIX=$(PWD)/$(LIBZIP_LINUX_ROOT) \
+			-DBUILD_SHARED_LIBS=OFF \
+			-DENABLE_COMMONCRYPTO=OFF \
+			-DENABLE_GNUTLS=OFF \
+			-DENABLE_OPENSSL=OFF \
+			-DENABLE_BZIP2=OFF \
+			-DCMAKE_C_FLAGS="-fPIC -O3" && \
+		make clean && make -j4 && make install
+
+# === Build libzip (Android) ===
+build-libzip-android:
+	@echo "Building libzip for Android..."
+	@if [ ! -f "$(LIBZIP_TARBALL)" ]; then \
+		wget -O $(LIBZIP_TARBALL) https://github.com/nih-at/libzip/releases/download/v$(LIBZIP_VER)/libzip-$(LIBZIP_VER).tar.gz; \
+	fi
+	@if [ ! -d "$(LIBZIP_DIR)" ]; then tar -xzf $(LIBZIP_TARBALL); fi
+	@mkdir -p $(LIBZIP_DIR)/build-android
+	@cd $(LIBZIP_DIR)/build-android && \
+		cmake .. -DCMAKE_BUILD_TYPE=Release \
+			-DCMAKE_INSTALL_PREFIX=$(PWD)/$(LIBZIP_ANDROID_ROOT) \
+			-DCMAKE_C_COMPILER=$(ANDROID_CC) \
+			-DCMAKE_CXX_COMPILER=$(ANDROID_CXX) \
+			-DCMAKE_C_FLAGS="-fPIC -O3" \
+			-DBUILD_SHARED_LIBS=OFF \
+			-DENABLE_COMMONCRYPTO=OFF \
+			-DENABLE_GNUTLS=OFF \
+			-DENABLE_OPENSSL=OFF \
+			-DENABLE_BZIP2=OFF && \
+		make clean && make -j4 && make install
+
+# === Build libzip (Windows) ===
+build-libzip-win:
+	@echo "Building libzip for Windows (MinGW)..."
+	@if [ ! -f "$(LIBZIP_TARBALL)" ]; then \
+		wget -O $(LIBZIP_TARBALL) https://github.com/nih-at/libzip/releases/download/v$(LIBZIP_VER)/libzip-$(LIBZIP_VER).tar.gz; \
+	fi
+	@if [ ! -d "$(LIBZIP_DIR)" ]; then tar -xzf $(LIBZIP_TARBALL); fi
+	@mkdir -p $(LIBZIP_DIR)/build-win
+	@cd $(LIBZIP_DIR)/build-win && \
+		cmake .. -DCMAKE_BUILD_TYPE=Release \
+			-DCMAKE_INSTALL_PREFIX=$(PWD)/$(LIBZIP_WIN_ROOT) \
+			-DCMAKE_C_COMPILER=$(WIN_CC) \
+			-DCMAKE_CXX_COMPILER=$(WIN_CXX) \
+			-DCMAKE_SYSTEM_NAME=Windows \
+			-DCMAKE_C_FLAGS="-fPIC -O3" \
+			-DBUILD_SHARED_LIBS=OFF \
+			-DENABLE_COMMONCRYPTO=OFF \
+			-DENABLE_GNUTLS=OFF \
+			-DENABLE_OPENSSL=OFF \
+			-DENABLE_BZIP2=OFF && \
+		make clean && make -j4 && make install
+
+# === Checks ===
+check-libzip-linux:
+	@if [ ! -d "$(LIBZIP_LINUX_LIB)" ]; then \
+		echo "Error: libzip not found for Linux. Run 'make build-libzip-linux' first."; \
+		exit 1; \
+	fi
+
+check-libzip-android:
+	@if [ ! -d "$(LIBZIP_ANDROID_LIB)" ]; then \
+		echo "Error: libzip not found for Android. Run 'make build-libzip-android' first."; \
+		exit 1; \
+	fi
+
+check-libzip-win:
+	@if [ ! -d "$(LIBZIP_WIN_LIB)" ]; then \
+		echo "Error: libzip not found for Windows. Run 'make build-libzip-win' first."; \
+		exit 1; \
+	fi
+
 
 # === Compiling ===
 %.o: %.cpp

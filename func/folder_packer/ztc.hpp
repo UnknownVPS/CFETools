@@ -7,263 +7,243 @@
 #include <vector>
 #include <cstdint>
 #include <algorithm>
-#include <cstring>
-#include <zlib.h>
+#include <memory>
+#include <zip.h>
 #include "../../utils/logger/logger.h"
 
 namespace fs = std::filesystem;
 
-// ZIP file format structures (little-endian)
-#pragma pack(push, 1)
-struct ZipLocalFileHeader {
-    uint32_t signature;           // 0x04034b50
-    uint16_t version;             // Version needed to extract
-    uint16_t flags;               // General purpose bit flag
-    uint16_t compression;         // Compression method (0=store, 8=deflate)
-    uint16_t mod_time;            // Last mod file time
-    uint16_t mod_date;            // Last mod file date
-    uint32_t crc32;               // CRC-32
-    uint32_t compressed_size;     // Compressed size
-    uint32_t uncompressed_size;   // Uncompressed size
-    uint16_t filename_len;        // File name length
-    uint16_t extra_len;           // Extra field length
-};
+constexpr size_t CHUNK_SIZE = 1024 * 1024 * 8; // 8MB chunks for streaming
 
-struct ZipCentralDirHeader {
-    uint32_t signature;           // 0x02014b50
-    uint16_t version_made;        // Version made by
-    uint16_t version_needed;      // Version needed to extract
-    uint16_t flags;               // General purpose bit flag
-    uint16_t compression;         // Compression method
-    uint16_t mod_time;            // Last mod file time
-    uint16_t mod_date;            // Last mod file date
-    uint32_t crc32;               // CRC-32
-    uint32_t compressed_size;     // Compressed size
-    uint32_t uncompressed_size;   // Uncompressed size
-    uint16_t filename_len;        // File name length
-    uint16_t extra_len;           // Extra field length
-    uint16_t comment_len;         // File comment length
-    uint16_t disk_start;          // Disk number start
-    uint16_t internal_attr;       // Internal file attributes
-    uint32_t external_attr;       // External file attributes
-    uint32_t local_header_offset; // Relative offset of local header
-};
+// RAII wrapper for libzip archive
+class ZipArchive {
+private:
+    zip_t* archive_ = nullptr;
 
-struct ZipEndOfCentralDir {
-    uint32_t signature;           // 0x06054b50
-    uint16_t disk_num;            // Number of this disk
-    uint16_t cd_start_disk;       // Disk where central directory starts
-    uint16_t cd_records_disk;     // Number of central directory records on this disk
-    uint16_t cd_records_total;    // Total number of central directory records
-    uint32_t cd_size;             // Size of central directory
-    uint32_t cd_offset;           // Offset of start of central directory
-    uint16_t comment_len;         // ZIP file comment length
-};
-#pragma pack(pop)
-
-constexpr uint32_t ZIP_LOCAL_SIG = 0x04034b50;
-constexpr uint32_t ZIP_CENTRAL_SIG = 0x02014b50;
-constexpr uint32_t ZIP_EOCD_SIG = 0x06054b50;
-constexpr size_t CHUNK_SIZE = 1024 * 1024 * 8; // 8MB chunks for maximum speed
-
-// Fast CRC32 calculation using zlib
-uint32_t calculate_crc32(std::ifstream& file, uint64_t size) {
-    uint32_t crc = crc32(0L, Z_NULL, 0);
-    std::vector<uint8_t> buffer(CHUNK_SIZE);
-    uint64_t remaining = size;
-    
-    while (remaining > 0) {
-        size_t to_read = std::min<uint64_t>(remaining, CHUNK_SIZE);
-        file.read(reinterpret_cast<char*>(buffer.data()), to_read);
-        crc = crc32(crc, buffer.data(), to_read);
-        remaining -= to_read;
-    }
-    
-    return crc;
-}
-
-// Find End of Central Directory by scanning from end of file
-bool find_eocd(std::ifstream& file, ZipEndOfCentralDir& eocd) {
-    file.seekg(0, std::ios::end);
-    std::streamoff file_size = file.tellg();
-    
-    // EOCD is at least 22 bytes, search last 64KB max
-    std::streamoff search_start = std::max<std::streamoff>(0, file_size - 65536);
-    file.seekg(search_start);
-    
-    std::vector<char> buffer(file_size - search_start);
-    file.read(buffer.data(), buffer.size());
-    
-    // Search backwards for EOCD signature
-    for (int i = buffer.size() - 22; i >= 0; --i) {
-        uint32_t sig = *reinterpret_cast<uint32_t*>(&buffer[i]);
-        if (sig == ZIP_EOCD_SIG) {
-            memcpy(&eocd, &buffer[i], sizeof(ZipEndOfCentralDir));
-            return true;
+public:
+    explicit ZipArchive(const std::string& path, int flags = 0) {
+        int error = 0;
+        archive_ = zip_open(path.c_str(), flags, &error);
+        if (!archive_) {
+            zip_error_t zip_error;
+            zip_error_init_with_code(&zip_error, error);
+            throw std::runtime_error("Failed to open ZIP: " + std::string(zip_error_strerror(&zip_error)));
         }
     }
-    
-    return false;
-}
 
-// Converts ZIP archive directly to CFUP format with streaming
+    ~ZipArchive() {
+        if (archive_) {
+            zip_close(archive_);
+        }
+    }
+
+    ZipArchive(const ZipArchive&) = delete;
+    ZipArchive& operator=(const ZipArchive&) = delete;
+
+    zip_t* get() { return archive_; }
+};
+
+// RAII wrapper for libzip file handle
+class ZipFile {
+private:
+    zip_file_t* file_ = nullptr;
+
+public:
+    explicit ZipFile(zip_t* archive, zip_uint64_t index) {
+        file_ = zip_fopen_index(archive, index, 0);
+        if (!file_) {
+            throw std::runtime_error("Failed to open file in ZIP archive");
+        }
+    }
+
+    ~ZipFile() {
+        if (file_) {
+            zip_fclose(file_);
+        }
+    }
+
+    ZipFile(const ZipFile&) = delete;
+    ZipFile& operator=(const ZipFile&) = delete;
+
+    zip_int64_t read(void* buffer, zip_uint64_t size) {
+        return zip_fread(file_, buffer, size);
+    }
+};
+
+// Converts ZIP archive to CFUP format with streaming
 bool convert_zip_to_cfup(const std::string& zipFilePath, const std::string& cfupFilePath) {
-    std::ifstream zip_in(zipFilePath, std::ios::binary);
-    if (!zip_in) {
-        Logger::Log(LOG_ERROR, "Failed to open ZIP file: " + zipFilePath);
-        return false;
-    }
+    try {
+        // Open ZIP archive using libzip
+        ZipArchive zip_archive(zipFilePath);
+        zip_t* zip = zip_archive.get();
 
-    // Find and read End of Central Directory
-    ZipEndOfCentralDir eocd;
-    if (!find_eocd(zip_in, eocd)) {
-        Logger::Log(LOG_ERROR, "Failed to find End of Central Directory");
-        return false;
-    }
-
-    // Read Central Directory
-    zip_in.seekg(eocd.cd_offset);
-    std::vector<char> cd_buffer(eocd.cd_size);
-    zip_in.read(cd_buffer.data(), eocd.cd_size);
-    
-    // Parse Central Directory entries
-    struct FileEntry {
-        std::string name;
-        uint32_t local_offset;
-        uint32_t compressed_size;
-        uint32_t uncompressed_size;
-        uint16_t compression;
-        uint32_t crc32;
-    };
-    
-    std::vector<FileEntry> files;
-    size_t offset = 0;
-    
-    while (offset < eocd.cd_size) {
-        ZipCentralDirHeader* cd = reinterpret_cast<ZipCentralDirHeader*>(&cd_buffer[offset]);
-        if (cd->signature != ZIP_CENTRAL_SIG) break;
-        
-        std::string filename(cd_buffer.data() + offset + sizeof(ZipCentralDirHeader), cd->filename_len);
-        
-        // Skip directories
-        if (filename.empty() || filename.back() != '/') {
-            std::replace(filename.begin(), filename.end(), '\\', '/');
-            files.push_back({
-                filename,
-                cd->local_header_offset,
-                cd->compressed_size,
-                cd->uncompressed_size,
-                cd->compression,
-                cd->crc32
-            });
-        }
-        
-        offset += sizeof(ZipCentralDirHeader) + cd->filename_len + cd->extra_len + cd->comment_len;
-    }
-
-    // Sort files alphabetically
-    std::sort(files.begin(), files.end(), [](const FileEntry& a, const FileEntry& b) {
-        return a.name < b.name;
-    });
-
-    uint32_t file_count = static_cast<uint32_t>(files.size());
-
-    // Open output CFUP file
-    std::ofstream out(cfupFilePath, std::ios::binary);
-    if (!out) {
-        Logger::Log(LOG_ERROR, "Failed to create CFUP file: " + cfupFilePath);
-        return false;
-    }
-
-    // Write file count header
-    out.write(reinterpret_cast<const char*>(&file_count), sizeof(file_count));
-
-    std::vector<uint8_t> compressed_buf(CHUNK_SIZE);
-    std::vector<uint8_t> decompressed_buf(CHUNK_SIZE);
-
-    // Process each file with streaming decompression
-    for (const auto& file : files) {
-        uint32_t path_len = static_cast<uint32_t>(file.name.size());
-        uint64_t data_size = file.uncompressed_size;
-
-        // Write path length and path
-        out.write(reinterpret_cast<const char*>(&path_len), sizeof(path_len));
-        out.write(file.name.data(), path_len);
-
-        // Write data size
-        out.write(reinterpret_cast<const char*>(&data_size), sizeof(data_size));
-
-        // Seek to local file header
-        zip_in.seekg(file.local_offset);
-        ZipLocalFileHeader local_hdr;
-        zip_in.read(reinterpret_cast<char*>(&local_hdr), sizeof(local_hdr));
-        
-        // Skip filename and extra field
-        zip_in.seekg(local_hdr.filename_len + local_hdr.extra_len, std::ios::cur);
-
-        if (file.compression == 0) {
-            // Stored (no compression) - direct copy
-            uint32_t remaining = file.uncompressed_size;
-            while (remaining > 0) {
-                size_t to_read = std::min<uint32_t>(remaining, CHUNK_SIZE);
-                zip_in.read(reinterpret_cast<char*>(compressed_buf.data()), to_read);
-                out.write(reinterpret_cast<const char*>(compressed_buf.data()), to_read);
-                remaining -= to_read;
-            }
-        } else if (file.compression == 8) {
-            // DEFLATE compression - streaming decompression
-            z_stream strm = {};
-            strm.zalloc = Z_NULL;
-            strm.zfree = Z_NULL;
-            strm.opaque = Z_NULL;
-            
-            // Use raw deflate (negative window bits)
-            if (inflateInit2(&strm, -MAX_WBITS) != Z_OK) {
-                Logger::Log(LOG_ERROR, "Failed to initialize decompression for: " + file.name);
-                return false;
-            }
-
-            uint32_t compressed_remaining = file.compressed_size;
-            
-            while (compressed_remaining > 0 || strm.avail_out == 0) {
-                if (strm.avail_in == 0 && compressed_remaining > 0) {
-                    size_t to_read = std::min<uint32_t>(compressed_remaining, CHUNK_SIZE);
-                    zip_in.read(reinterpret_cast<char*>(compressed_buf.data()), to_read);
-                    strm.avail_in = to_read;
-                    strm.next_in = compressed_buf.data();
-                    compressed_remaining -= to_read;
-                }
-
-                strm.avail_out = CHUNK_SIZE;
-                strm.next_out = decompressed_buf.data();
-                
-                int ret = inflate(&strm, Z_NO_FLUSH);
-                if (ret != Z_OK && ret != Z_STREAM_END) {
-                    Logger::Log(LOG_ERROR, "Decompression error for: " + file.name);
-                    inflateEnd(&strm);
-                    return false;
-                }
-
-                size_t decompressed = CHUNK_SIZE - strm.avail_out;
-                if (decompressed > 0) {
-                    out.write(reinterpret_cast<const char*>(decompressed_buf.data()), decompressed);
-                }
-
-                if (ret == Z_STREAM_END) break;
-            }
-
-            inflateEnd(&strm);
-        } else {
-            Logger::Log(LOG_ERROR, "Unsupported compression method for: " + file.name);
+        // Get number of entries
+        zip_int64_t num_entries = zip_get_num_entries(zip, 0);
+        if (num_entries < 0) {
+            Logger::Log(LOG_ERROR, "Failed to get ZIP entry count");
             return false;
         }
+
+        // Collect file entries (skip directories)
+        struct FileEntry {
+            std::string name;
+            zip_uint64_t index;
+            zip_uint64_t size;
+        };
+
+        std::vector<FileEntry> files;
+        files.reserve(num_entries);
+
+        for (zip_int64_t i = 0; i < num_entries; ++i) {
+            zip_stat_t stat;
+            if (zip_stat_index(zip, i, 0, &stat) != 0) {
+                Logger::Log(LOG_ERROR, "Failed to stat entry at index " + std::to_string(i));
+                continue;
+            }
+
+            std::string name = stat.name;
+            
+            // Skip directories (names ending with '/')
+            if (name.empty() || name.back() == '/') {
+                continue;
+            }
+
+            // Normalize path separators
+            std::replace(name.begin(), name.end(), '\\', '/');
+
+            files.push_back({name, static_cast<zip_uint64_t>(i), stat.size});
+        }
+
+        // Sort files alphabetically for consistent output
+        std::sort(files.begin(), files.end(), [](const FileEntry& a, const FileEntry& b) {
+            return a.name < b.name;
+        });
+
+        uint32_t file_count = static_cast<uint32_t>(files.size());
+
+        // Open output CFUP file
+        std::ofstream out(cfupFilePath, std::ios::binary);
+        if (!out) {
+            Logger::Log(LOG_ERROR, "Failed to create CFUP file: " + cfupFilePath);
+            return false;
+        }
+
+        // Write file count header
+        out.write(reinterpret_cast<const char*>(&file_count), sizeof(file_count));
+
+        // Streaming buffer
+        std::vector<uint8_t> buffer(CHUNK_SIZE);
+
+        // Process each file with streaming
+        for (const auto& file : files) {
+            uint32_t path_len = static_cast<uint32_t>(file.name.size());
+            uint64_t data_size = file.size;
+
+            // Write path length and path
+            out.write(reinterpret_cast<const char*>(&path_len), sizeof(path_len));
+            out.write(file.name.data(), path_len);
+
+            // Write data size
+            out.write(reinterpret_cast<const char*>(&data_size), sizeof(data_size));
+
+            // Stream file data using libzip
+            // libzip automatically handles decompression
+            ZipFile zip_file(zip, file.index);
+            
+            uint64_t remaining = data_size;
+            while (remaining > 0) {
+                size_t to_read = std::min<uint64_t>(remaining, CHUNK_SIZE);
+                zip_int64_t bytes_read = zip_file.read(buffer.data(), to_read);
+                
+                if (bytes_read < 0) {
+                    Logger::Log(LOG_ERROR, "Failed to read from ZIP file: " + file.name);
+                    return false;
+                }
+                
+                if (bytes_read == 0) {
+                    break; // EOF
+                }
+
+                out.write(reinterpret_cast<const char*>(buffer.data()), bytes_read);
+                remaining -= bytes_read;
+            }
+
+            if (remaining > 0) {
+                Logger::Log(LOG_ERROR, "Incomplete read for file: " + file.name);
+                return false;
+            }
+        }
+
+        out.close();
+        Logger::Log(LOG_INFO, "Converted ZIP to CFUP: " + std::to_string(file_count) + " files");
+        return true;
+
+    } catch (const std::exception& e) {
+        Logger::Log(LOG_ERROR, "Exception during ZIP to CFUP conversion: " + std::string(e.what()));
+        return false;
     }
+}
 
-    out.close();
-    zip_in.close();
+// Custom source callback for streaming from CFUP to ZIP
+struct CFUPSourceData {
+    std::ifstream* input;
+    uint64_t file_size;
+    uint64_t bytes_read;
+    std::vector<uint8_t> buffer;
 
-    Logger::Log(LOG_INFO, "Converted ZIP to CFUP: " + std::to_string(file_count) + " files");
-    return true;
+    CFUPSourceData(std::ifstream* in, uint64_t size) 
+        : input(in), file_size(size), bytes_read(0), buffer(CHUNK_SIZE) {}
+};
+
+// Callback function for zip_source_function
+static zip_int64_t cfup_source_callback(void* userdata, void* data, zip_uint64_t len, zip_source_cmd_t cmd) {
+    CFUPSourceData* src = static_cast<CFUPSourceData*>(userdata);
+
+    switch (cmd) {
+        case ZIP_SOURCE_OPEN:
+            src->bytes_read = 0;
+            return 0;
+
+        case ZIP_SOURCE_READ: {
+            if (src->bytes_read >= src->file_size) {
+                return 0; // EOF
+            }
+
+            uint64_t remaining = src->file_size - src->bytes_read;
+            size_t to_read = std::min<uint64_t>(len, remaining);
+            
+            src->input->read(reinterpret_cast<char*>(data), to_read);
+            size_t actually_read = src->input->gcount();
+            
+            src->bytes_read += actually_read;
+            return actually_read;
+        }
+
+        case ZIP_SOURCE_CLOSE:
+            return 0;
+
+        case ZIP_SOURCE_STAT: {
+            zip_stat_t* stat = static_cast<zip_stat_t*>(data);
+            zip_stat_init(stat);
+            stat->size = src->file_size;
+            stat->valid = ZIP_STAT_SIZE;
+            return sizeof(zip_stat_t);
+        }
+
+        case ZIP_SOURCE_ERROR: {
+            zip_error_t zip_error;
+            zip_error_init_with_code(&zip_error, ZIP_ER_INTERNAL);
+            zip_int64_t ret = zip_error_to_data(&zip_error, data, len);
+            return ret;
+        }
+
+        case ZIP_SOURCE_FREE:
+            delete src;
+            return 0;
+
+        default:
+            return -1;
+    }
 }
 
 // Converts CFUP back to ZIP format with streaming compression
@@ -282,152 +262,73 @@ bool convert_cfup_to_zip(const std::string& cfupFilePath, const std::string& zip
         return false;
     }
 
-    std::ofstream zip_out(zipFilePath, std::ios::binary);
-    if (!zip_out) {
-        Logger::Log(LOG_ERROR, "Failed to create ZIP file: " + zipFilePath);
+    try {
+        // Create new ZIP archive
+        int error = 0;
+        zip_t* zip = zip_open(zipFilePath.c_str(), ZIP_CREATE | ZIP_TRUNCATE, &error);
+        if (!zip) {
+            zip_error_t zip_error;
+            zip_error_init_with_code(&zip_error, error);
+            Logger::Log(LOG_ERROR, "Failed to create ZIP: " + std::string(zip_error_strerror(&zip_error)));
+            return false;
+        }
+
+    // Per-file compression is set below with zip_set_file_compression.
+    // (Removed invalid call to zip_set_default_compression which is not part of libzip's public API.)
+
+        // Process each file
+        for (uint32_t i = 0; i < file_count; ++i) {
+            // Read path length and path
+            uint32_t path_len;
+            in.read(reinterpret_cast<char*>(&path_len), sizeof(path_len));
+            
+            std::string relative_path(path_len, '\0');
+            in.read(&relative_path[0], path_len);
+
+            // Read data size
+            uint64_t data_size;
+            in.read(reinterpret_cast<char*>(&data_size), sizeof(data_size));
+
+            // Create streaming source for this file
+            // Note: CFUPSourceData will be deleted by ZIP_SOURCE_FREE callback
+            CFUPSourceData* src_data = new CFUPSourceData(&in, data_size);
+            
+            zip_source_t* source = zip_source_function(zip, cfup_source_callback, src_data);
+            if (!source) {
+                Logger::Log(LOG_ERROR, "Failed to create ZIP source for: " + relative_path);
+                delete src_data;
+                zip_close(zip);
+                return false;
+            }
+
+            // Add file to ZIP with streaming source
+            zip_int64_t idx = zip_file_add(zip, relative_path.c_str(), source, ZIP_FL_OVERWRITE | ZIP_FL_ENC_UTF_8);
+            if (idx < 0) {
+                Logger::Log(LOG_ERROR, "Failed to add file to ZIP: " + relative_path);
+                zip_source_free(source);
+                zip_close(zip);
+                return false;
+            }
+
+            // Set compression method (DEFLATE with level 6)
+            zip_set_file_compression(zip, idx, ZIP_CM_DEFLATE, 6);
+        }
+
+        // Finalize and close ZIP
+        if (zip_close(zip) != 0) {
+            Logger::Log(LOG_ERROR, "Failed to finalize ZIP file");
+            return false;
+        }
+
+        in.close();
+        Logger::Log(LOG_INFO, "Converted CFUP to ZIP: " + std::to_string(file_count) + " files");
+        return true;
+
+    } catch (const std::exception& e) {
+        Logger::Log(LOG_ERROR, "Exception during CFUP to ZIP conversion: " + std::string(e.what()));
+        in.close();
         return false;
     }
-
-    struct LocalFileInfo {
-        std::string name;
-        uint32_t offset;
-        uint32_t compressed_size;
-        uint32_t uncompressed_size;
-        uint32_t crc32;
-    };
-
-    std::vector<LocalFileInfo> file_infos;
-    std::vector<uint8_t> input_buf(CHUNK_SIZE);
-    std::vector<uint8_t> output_buf(CHUNK_SIZE);
-
-    // Write local file headers and compressed data
-    for (uint32_t i = 0; i < file_count; ++i) {
-        // Read path length and path
-        uint32_t path_len;
-        in.read(reinterpret_cast<char*>(&path_len), sizeof(path_len));
-        
-        std::string relative_path(path_len, '\0');
-        in.read(&relative_path[0], path_len);
-
-        // Read data size
-        uint64_t data_size;
-        in.read(reinterpret_cast<char*>(&data_size), sizeof(data_size));
-
-        if (data_size > 0xFFFFFFFF) {
-            Logger::Log(LOG_ERROR, "File too large for ZIP format: " + relative_path);
-            return false;
-        }
-
-        uint32_t local_offset = static_cast<uint32_t>(zip_out.tellp());
-        uint32_t uncompressed = static_cast<uint32_t>(data_size);
-
-        // Calculate CRC32 for the uncompressed data
-        std::streampos data_start = in.tellg();
-        uint32_t crc = calculate_crc32(in, data_size);
-        in.seekg(data_start); // Reset to start of data
-
-        // Write local file header (will update sizes later)
-        ZipLocalFileHeader local_hdr = {};
-        local_hdr.signature = ZIP_LOCAL_SIG;
-        local_hdr.version = 20;
-        local_hdr.flags = 0;
-        local_hdr.compression = 8; // DEFLATE
-        local_hdr.crc32 = crc;
-        local_hdr.uncompressed_size = uncompressed;
-        local_hdr.filename_len = path_len;
-        local_hdr.extra_len = 0;
-
-        std::streampos hdr_pos = zip_out.tellp();
-        zip_out.write(reinterpret_cast<const char*>(&local_hdr), sizeof(local_hdr));
-        zip_out.write(relative_path.c_str(), path_len);
-
-        // Streaming compression
-        z_stream strm = {};
-        strm.zalloc = Z_NULL;
-        strm.zfree = Z_NULL;
-        strm.opaque = Z_NULL;
-        
-        if (deflateInit2(&strm, Z_DEFAULT_COMPRESSION, Z_DEFLATED, -MAX_WBITS, 8, Z_DEFAULT_STRATEGY) != Z_OK) {
-            Logger::Log(LOG_ERROR, "Failed to initialize compression for: " + relative_path);
-            return false;
-        }
-
-        uint64_t remaining = data_size;
-        uint32_t compressed_total = 0;
-
-        while (remaining > 0) {
-            size_t to_read = std::min<uint64_t>(remaining, CHUNK_SIZE);
-            in.read(reinterpret_cast<char*>(input_buf.data()), to_read);
-            
-            strm.avail_in = to_read;
-            strm.next_in = input_buf.data();
-            remaining -= to_read;
-
-            int flush = (remaining == 0) ? Z_FINISH : Z_NO_FLUSH;
-
-            do {
-                strm.avail_out = CHUNK_SIZE;
-                strm.next_out = output_buf.data();
-                
-                deflate(&strm, flush);
-                
-                size_t compressed = CHUNK_SIZE - strm.avail_out;
-                if (compressed > 0) {
-                    zip_out.write(reinterpret_cast<const char*>(output_buf.data()), compressed);
-                    compressed_total += compressed;
-                }
-            } while (strm.avail_out == 0);
-        }
-
-        deflateEnd(&strm);
-
-        // Update compressed size in header
-        std::streampos end_pos = zip_out.tellp();
-        zip_out.seekp(hdr_pos);
-        local_hdr.compressed_size = compressed_total;
-        zip_out.write(reinterpret_cast<const char*>(&local_hdr), sizeof(local_hdr));
-        zip_out.seekp(end_pos);
-
-        file_infos.push_back({relative_path, local_offset, compressed_total, uncompressed, crc});
-    }
-
-    // Write Central Directory
-    uint32_t cd_offset = static_cast<uint32_t>(zip_out.tellp());
-    
-    for (const auto& info : file_infos) {
-        ZipCentralDirHeader cd = {};
-        cd.signature = ZIP_CENTRAL_SIG;
-        cd.version_made = 20;
-        cd.version_needed = 20;
-        cd.flags = 0;
-        cd.compression = 8;
-        cd.crc32 = info.crc32;
-        cd.compressed_size = info.compressed_size;
-        cd.uncompressed_size = info.uncompressed_size;
-        cd.filename_len = info.name.size();
-        cd.local_header_offset = info.offset;
-        
-        zip_out.write(reinterpret_cast<const char*>(&cd), sizeof(cd));
-        zip_out.write(info.name.c_str(), info.name.size());
-    }
-
-    uint32_t cd_size = static_cast<uint32_t>(zip_out.tellp()) - cd_offset;
-
-    // Write End of Central Directory
-    ZipEndOfCentralDir eocd = {};
-    eocd.signature = ZIP_EOCD_SIG;
-    eocd.cd_records_disk = file_count;
-    eocd.cd_records_total = file_count;
-    eocd.cd_size = cd_size;
-    eocd.cd_offset = cd_offset;
-    
-    zip_out.write(reinterpret_cast<const char*>(&eocd), sizeof(eocd));
-
-    zip_out.close();
-    in.close();
-
-    Logger::Log(LOG_INFO, "Converted CFUP to ZIP: " + std::to_string(file_count) + " files");
-    return true;
 }
 
 #endif // ZIP_TO_CFUP_CONVERTER_H

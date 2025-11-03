@@ -13,3 +13,4 @@
 #include "patch.h"
 #include "compress.h"
 #include "decompress.h"
+#include "ztc.h"
