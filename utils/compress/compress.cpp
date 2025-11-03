@@ -113,7 +113,7 @@ bool compressFile(const std::string& input_file, const std::string& output_file,
                 outfile.write(outBuf.data(), finalSize);
                 total_compressed += finalSize;
                 success = true;
-                algorithm_used = "LZ4 Fast (Streaming)";
+                algorithm_used = "LZ4 Fast";
             }
             LZ4F_freeCompressionContext(cctx);
 #else
@@ -170,7 +170,7 @@ bool compressFile(const std::string& input_file, const std::string& output_file,
                 outfile.write(outBuf.data(), finalSize);
                 total_compressed += finalSize;
                 success = true;
-                algorithm_used = "LZ4-HC (Streaming)";
+                algorithm_used = "LZ4-HC";
             }
             LZ4F_freeCompressionContext(cctx);
 #else
@@ -218,7 +218,7 @@ bool compressFile(const std::string& input_file, const std::string& output_file,
 
             ZSTD_freeCCtx(cctx);
             success = true;
-            algorithm_used = "ZSTD (Streaming)";
+            algorithm_used = "ZSTD";
 #else
             Logger::Log(LOG_ERROR, "ZSTD not available");
 #endif
@@ -234,15 +234,15 @@ bool compressFile(const std::string& input_file, const std::string& output_file,
             if (compression_lvl <= 17) {
                 opt_lzma.dict_size = (compression_lvl == 16) ? (64U << 20) : (128U << 20);
                 opt_lzma.depth = 512;
-                algorithm_used = "LZMA2 Ultra (Streaming)";
+                algorithm_used = "LZMA2 Ultra";
             } else if (compression_lvl <= 19) {
                 opt_lzma.dict_size = (compression_lvl == 18) ? (128U << 20) : (256U << 20);
                 opt_lzma.depth = 1000;
-                algorithm_used = "LZMA2 Maximum (Streaming)";
+                algorithm_used = "LZMA2 Maximum";
             } else {
                 opt_lzma.dict_size = (compression_lvl == 20) ? (128U << 20) : (256U << 20);
                 opt_lzma.depth = 2000;
-                algorithm_used = "LZMA2 Extreme (Streaming)";
+                algorithm_used = "LZMA2 Extreme";
             }
 
             opt_lzma.nice_len = 273;

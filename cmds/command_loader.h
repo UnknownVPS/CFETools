@@ -11,4 +11,5 @@
 #include "hash.h"
 #include "diff.h"
 #include "patch.h"
-#include "ztc.h"
+#include "compress.h"
+#include "decompress.h"
