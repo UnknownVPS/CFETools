@@ -2,3 +2,8 @@ cfx*
 .vscode
 *.o
 *.a
+xz*
+zlib*
+zstd*
+libzip*
+lz4*

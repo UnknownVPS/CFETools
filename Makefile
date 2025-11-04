@@ -165,7 +165,7 @@ build-libzip-android:
 	@mkdir -p $(LIBZIP_DIR)/build-android
 	@cd $(LIBZIP_DIR)/build-android && \
 		cmake .. -DCMAKE_BUILD_TYPE=Release \
-			-DCMAKE_INSTALL_PREFIX=$(PWD)/$(LIBZIP_ANDROID_ROOT) \
+			-DCMAKE_INSTALL_PREFIX=$(shell pwd)/$(LIBZIP_ANDROID_ROOT) \
 			-DCMAKE_C_COMPILER=$(ANDROID_CC) \
 			-DCMAKE_CXX_COMPILER=$(ANDROID_CXX) \
 			-DCMAKE_C_FLAGS="-fPIC -O3" \
@@ -173,19 +173,17 @@ build-libzip-android:
 			-DENABLE_COMMONCRYPTO=OFF \
 			-DENABLE_GNUTLS=OFF \
 			-DENABLE_OPENSSL=OFF \
-			-DLZMA_LIBRARY=$(XZ_ANDROID_LIB)/liblzma.a \
-			-DLZMA_INCLUDE_DIR=$(XZ_ANDROID_INCLUDE) \
-			-DZLIB_LIBRARY=$(ZLIB_ANDROID_LIB)/libz.a \
-			-DZLIB_INCLUDE_DIR=$(ZLIB_ANDROID_INCLUDE) \
-			-DZSTD_LIBRARY=$(ZSTD_ANDROID_LIB)/libzstd.a \
-			-DZSTD_INCLUDE_DIR=$(ZSTD_ANDROID_INCLUDE) \
-			-DLZ4_LIBRARY=$(LZ4_ANDROID_LIB)/liblz4.a \
-			-DLZ4_INCLUDE_DIR=$(LZ4_ANDROID_INCLUDE) \
-			-DCMAKE_DISABLE_FIND_PACKAGE_LibLZMA=ON \
-			-DCMAKE_DISABLE_FIND_PACKAGE_ZLIB=ON \
-			-DCMAKE_DISABLE_FIND_PACKAGE_Zstd=ON \
-			-DCMAKE_DISABLE_FIND_PACKAGE_LZ4=ON \
-			-DENABLE_BZIP2=OFF && \
+			-DENABLE_MBEDTLS=OFF \
+			-DENABLE_BZIP2=OFF \
+			-DENABLE_LZMA=ON \
+			-DENABLE_ZSTD=ON \
+			-DENABLE_ZLIB=ON \
+			-DLIBLZMA_LIBRARY=$(shell pwd)/$(XZ_ANDROID_LIB)/liblzma.a \
+			-DLIBLZMA_INCLUDE_DIR=$(shell pwd)/$(XZ_ANDROID_INCLUDE) \
+			-DZLIB_LIBRARY=$(shell pwd)/$(ZLIB_ANDROID_LIB)/libz.a \
+			-DZLIB_INCLUDE_DIR=$(shell pwd)/$(ZLIB_ANDROID_INCLUDE) \
+			-Dzstd_LIBRARY=$(shell pwd)/$(ZSTD_ANDROID_LIB)/libzstd.a \
+			-Dzstd_INCLUDE_DIR=$(shell pwd)/$(ZSTD_ANDROID_INCLUDE) && \
 		make clean && make -j4 && make install
 
 # === Build libzip (Windows) ===
@@ -198,7 +196,7 @@ build-libzip-win:
 	@mkdir -p $(LIBZIP_DIR)/build-win
 	@cd $(LIBZIP_DIR)/build-win && \
 		cmake .. -DCMAKE_BUILD_TYPE=Release \
-			-DCMAKE_INSTALL_PREFIX=$(PWD)/$(LIBZIP_WIN_ROOT) \
+			-DCMAKE_INSTALL_PREFIX=$(shell pwd)/$(LIBZIP_WIN_ROOT) \
 			-DCMAKE_C_COMPILER=$(WIN_CC) \
 			-DCMAKE_CXX_COMPILER=$(WIN_CXX) \
 			-DCMAKE_SYSTEM_NAME=Windows \
@@ -207,19 +205,17 @@ build-libzip-win:
 			-DENABLE_COMMONCRYPTO=OFF \
 			-DENABLE_GNUTLS=OFF \
 			-DENABLE_OPENSSL=OFF \
-			-DLZMA_LIBRARY=$(XZ_WIN_LIB)/liblzma.a \
-			-DLZMA_INCLUDE_DIR=$(XZ_WIN_INCLUDE) \
-			-DZLIB_LIBRARY=$(ZLIB_WIN_LIB)/libz.a \
-			-DZLIB_INCLUDE_DIR=$(ZLIB_WIN_INCLUDE) \
-			-DZSTD_LIBRARY=$(ZSTD_WIN_LIB)/libzstd.a \
-			-DZSTD_INCLUDE_DIR=$(ZSTD_WIN_INCLUDE) \
-			-DLZ4_LIBRARY=$(LZ4_WIN_LIB)/liblz4.a \
-			-DLZ4_INCLUDE_DIR=$(LZ4_WIN_INCLUDE) \
-			-DCMAKE_DISABLE_FIND_PACKAGE_LibLZMA=ON \
-			-DCMAKE_DISABLE_FIND_PACKAGE_ZLIB=ON \
-			-DCMAKE_DISABLE_FIND_PACKAGE_Zstd=ON \
-			-DCMAKE_DISABLE_FIND_PACKAGE_LZ4=ON \
-			-DENABLE_BZIP2=OFF && \
+			-DENABLE_MBEDTLS=OFF \
+			-DENABLE_BZIP2=OFF \
+			-DENABLE_LZMA=ON \
+			-DENABLE_ZSTD=ON \
+			-DENABLE_ZLIB=ON \
+			-DLIBLZMA_LIBRARY=$(shell pwd)/$(XZ_WIN_LIB)/liblzma.a \
+			-DLIBLZMA_INCLUDE_DIR=$(shell pwd)/$(XZ_WIN_INCLUDE) \
+			-DZLIB_LIBRARY=$(shell pwd)/$(ZLIB_WIN_LIB)/libz.a \
+			-DZLIB_INCLUDE_DIR=$(shell pwd)/$(ZLIB_WIN_INCLUDE) \
+			-Dzstd_LIBRARY=$(shell pwd)/$(ZSTD_WIN_LIB)/libzstd.a \
+			-Dzstd_INCLUDE_DIR=$(shell pwd)/$(ZSTD_WIN_INCLUDE) && \
 		make clean && make -j4 && make install
 
 # === Checks ===
