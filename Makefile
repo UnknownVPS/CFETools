@@ -113,9 +113,9 @@ LIBZIP_WIN_LIB = $(LIBZIP_WIN_ROOT)/lib
 COMPILE_FLAGS = -Wall -std=c++23 -O3 -pthread -DUSE_LZ4 -DUSE_ZSTD -DUSE_LIBLZMA -I$(LIBZIP_LINUX_INCLUDE)
 LINK_FLAGS = -L$(LIBZIP_LINUX_LIB) -lsodium -flto -pthread -lzip -llz4 -lzstd -llzma -lz -static
 ANDROID_COMPILE_FLAGS = $(COMPILE_FLAGS) -I$(LIBSODIUM_INCLUDE) -I$(LZ4_ANDROID_INCLUDE) -I$(ZSTD_ANDROID_INCLUDE) -I$(XZ_ANDROID_INCLUDE) -I$(ZLIB_ANDROID_INCLUDE) -I$(LIBZIP_ANDROID_INCLUDE)
-ANDROID_LINK_FLAGS = -L$(LIBSODIUM_LIB) -L$(LZ4_ANDROID_LIB) -L$(ZSTD_ANDROID_LIB) -L$(XZ_ANDROID_LIB) -L$(ZLIB_ANDROID_LIB) -L$(LIBZIP_ANDROID_LIB) -Wl,-Bstatic -llz4 -lzstd -llzma -lz -lzip -Wl,-Bdynamic -lsodium -static-libstdc++
+ANDROID_LINK_FLAGS = -L$(LIBSODIUM_LIB) -L$(LZ4_ANDROID_LIB) -L$(ZSTD_ANDROID_LIB) -L$(XZ_ANDROID_LIB) -L$(ZLIB_ANDROID_LIB) -L$(LIBZIP_ANDROID_LIB) -Wl,-Bstatic -llz4 -lzip -lzstd -llzma -lz -Wl,-Bdynamic -lsodium -static-libstdc++
 WIN_COMPILE_FLAGS = $(COMPILE_FLAGS) -I$(LIBSODIUM_WIN_INCLUDE) -I$(LZ4_WIN_INCLUDE) -I$(ZSTD_WIN_INCLUDE) -I$(XZ_WIN_INCLUDE) -I$(ZLIB_WIN_INCLUDE) -I$(LIBZIP_WIN_INCLUDE) --static
-WIN_LINK_FLAGS = -L$(LIBSODIUM_WIN_LIB) -L$(LZ4_WIN_LIB) -L$(ZSTD_WIN_LIB) -L$(XZ_WIN_LIB) -L$(ZLIB_WIN_LIB) -L$(LIBZIP_WIN_LIB) -lsodium -llz4 -lzstd -llzma -lz -lzip -static-libstdc++ -static-libgcc --static
+WIN_LINK_FLAGS = -L$(LIBSODIUM_WIN_LIB) -L$(LZ4_WIN_LIB) -L$(ZSTD_WIN_LIB) -L$(XZ_WIN_LIB) -L$(ZLIB_WIN_LIB) -L$(LIBZIP_WIN_LIB) -lsodium -llz4 -lzip -lzstd -llzma -lz -lbcrypt -static-libstdc++ -static-libgcc --static
 
 # === Updated targets ===
 all: $(TARGET)

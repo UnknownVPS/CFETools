@@ -7,3 +7,4 @@ zlib*
 zstd*
 libzip*
 lz4*
+libsodium*
