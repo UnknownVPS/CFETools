@@ -1,5 +1,5 @@
 
-# CFETools - Axle
+# CFETools - Gears
 
 A compression and file encoding tool written in C++ for speed and security.
 
