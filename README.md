@@ -1,5 +1,5 @@
 
-# Nutox
+# CFETools - Gears
 
 A compression and file encoding tool written in C++ for speed and security.
 
@@ -16,12 +16,6 @@ A compression and file encoding tool written in C++ for speed and security.
 - Folders are supported
 - Diff and Patch
 
-
-## Graphs (Performance)
-
-<img src="https://files.unknownvps.eu.org/get/file/cfx_encode_decode_times.png" alt="Response Time Graph" width=75% height=300 />
-
-<img src="https://files.unknownvps.eu.org/get/file/cfx_throughput_comparison.png" alt="Throughput Graph" width=75% height=300 />
 
 
 ## Installation
