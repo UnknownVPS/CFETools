@@ -38,8 +38,9 @@ public:
             std::string folderHash = FolderHasher::hash_folder(file, !noRecursionFlag);
             Logger::Log(LOG_INFO, "Folder Hash: " + folderHash);
             if (exportInfoFlag) {
-                FolderHasher::export_folder_info(file, std::filesystem::path(save_path) / (file + "_hash_info.txt"), !noRecursionFlag);
-                Logger::Log(LOG_INFO, "Exported folder hash info to " + (std::filesystem::path(save_path) / (file + "_hash_info.txt")).string());
+                auto output_path = std::filesystem::path(save_path) / (file + "_hash_info.txt");
+                FolderHasher::export_folder_info(file, output_path.string(), !noRecursionFlag);
+                Logger::Log(LOG_INFO, "Exported folder hash info to " + output_path.string());
             }
             return 0;
         }
