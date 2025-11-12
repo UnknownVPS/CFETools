@@ -18,6 +18,8 @@ bool disableHash = false;
 std::string save_path = "";
 bool shaEnabled = false;
 bool crcEnabled = false;
+bool noRecursionFlag = false;
+bool exportInfoFlag = false;
 
 // Parse command line arguments into context
 CommandContext parseArgs(int argc, char* argv[]) {
@@ -63,6 +65,8 @@ void applyGlobalConfig(const CommandContext& ctx) {
     crcEnabled = ctx.boolFlags.count("crc") || ctx.boolFlags.count("crc32");
     save_path = ctx.flags.count("save-path") ? ctx.flags.at("save-path") :
                 (ctx.flags.count("sp") ? ctx.flags.at("sp") : save_path);
+    noRecursionFlag = ctx.boolFlags.count("no-recursion") || ctx.boolFlags.count("nr");
+    exportInfoFlag = ctx.boolFlags.count("export-info") || ctx.boolFlags.count("ei");
 }
 
 // Show help for all commands
