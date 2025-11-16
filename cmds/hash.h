@@ -38,7 +38,14 @@ public:
             std::string folderHash = FolderHasher::hash_folder(file, !noRecursionFlag);
             Logger::Log(LOG_INFO, "Folder Hash: " + folderHash);
             if (exportInfoFlag) {
-                auto output_path = std::filesystem::path(save_path) / (file + "_hash_info.txt");
+                // Extract just the folder name, not the full path
+                std::string folder_name = std::filesystem::path(file).filename().string();
+                if (folder_name.empty()) {
+                    // Handle case where path ends with / (filename() returns empty)
+                    folder_name = std::filesystem::path(file).parent_path().filename().string();
+                }
+                
+                auto output_path = std::filesystem::path(save_path) / (folder_name + "_hash_info.txt");
                 FolderHasher::export_folder_info(file, output_path.string(), !noRecursionFlag);
                 Logger::Log(LOG_INFO, "Exported folder hash info to " + output_path.string());
             }
