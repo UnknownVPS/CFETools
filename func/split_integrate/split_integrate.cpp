@@ -8,7 +8,7 @@
 #include <stdexcept>
 #include <random>
 #include <cstring>
-
+#include "../../globals.h"
 using namespace std;
 
 // ==================================================
@@ -239,8 +239,17 @@ bool SecretSharing::splitFile(const string& input_file, const string& output_pre
     // 4. Open Output Files & Write Headers
     vector<ofstream> outfiles(n_shares);
     for (int i = 0; i < n_shares; i++) {
-        string name = output_prefix + "_split_" + to_string(i+1) + ".cfs";
-        outfiles[i].open(name, ios::binary);
+        // Construct the base filename
+        string filename = output_prefix + "_split_" + to_string(i+1) + ".cfs";
+
+        string full_path;
+        if (!save_path.empty() && save_path.back() != '/' && save_path.back() != '\\') {
+            full_path = save_path + "/" + filename;
+        } else {
+            full_path = save_path + filename;
+        }
+        
+        outfiles[i].open(full_path, ios::binary);
         if (!outfiles[i]) return false;
         
         uint8_t id = i + 1;
@@ -345,7 +354,14 @@ bool SecretSharing::integrateShares(const vector<string>& filenames, const strin
     auto matrix = createVandermondeMatrix(ids, k_threshold);
     if (!invertMatrix(matrix)) return false;
 
-    ofstream outfile(output_file, ios::binary);
+    string final_out_path;
+    if (!save_path.empty() && save_path.back() != '/' && save_path.back() != '\\') {
+        final_out_path = save_path + "/" + output_file;
+    } else {
+        final_out_path = save_path + output_file;
+    }
+
+    ofstream outfile(final_out_path, ios::binary);
     
     // 4. Streaming Loop
     int batch_size = 4096; 

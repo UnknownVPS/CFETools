@@ -67,7 +67,7 @@ public:
         try {
             SecretSharing ss(n_val, k_val);
             // Ensure output directory exists or handle paths
-            if (!ss.splitFile(file, std::filesystem::path(file).stem())) {
+            if (!ss.splitFile(file, std::filesystem::path(file).filename().stem().string())) {
                 Logger::Log(LOG_ERROR, "Failed to split file (check file permissions or disk space).");
                 return 1;
             }
