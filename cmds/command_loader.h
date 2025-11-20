@@ -1,6 +1,4 @@
 #pragma once
-// Auto-generated - DO NOT EDIT MANUALLY
-// Run ./bash.sh update to regenerate
 
 #include "command_base.h"
 
@@ -14,3 +12,5 @@
 #include "compress.h"
 #include "decompress.h"
 #include "ztc.h"
+#include "split.h"
+#include "integrate.h"

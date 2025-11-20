@@ -83,6 +83,7 @@ SRCS = utils/userinput/user_input.cpp \
        utils/compress/compress.cpp \
        utils/compress/decompress.cpp \
 	   utils/aio/aio_header.cpp \
+	   func/split_integrate/split_integrate.cpp \
        main.cpp
 
 OBJS = $(SRCS:.cpp=.o)
