@@ -395,7 +395,7 @@ install-libsodium:
 			--host=aarch64-linux-android \
 			--prefix=$(PWD)/libsodium-android \
 			--disable-shared --enable-static \
-			--disable-pie --enable-minimal && \
+			--disable-pie && \
 		make clean && make -j4 && make install; \
 	fi
 
