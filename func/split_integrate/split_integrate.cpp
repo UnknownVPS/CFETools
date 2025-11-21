@@ -406,10 +406,6 @@ bool SecretSharing::splitFile(const string& input_file, const string& output_pre
         
         // Update byte counter for next iteration
         total_bytes_processed += padded_size;
-        
-        if (total_bytes_processed % (100 * BLOCK_SIZE) == 0) {
-            cout << "  Processed " << total_bytes_processed << " bytes..." << endl;
-        }
     }
     
     // Finalize and write HMAC for each share
@@ -644,10 +640,6 @@ bool SecretSharing::integrateShares(const vector<string>& filenames,
         outfile.write((char*)decoded_block.data(), to_write);
         bytes_written += to_write;
         total_bytes_processed += decoded_block.size();
-        
-        if (total_bytes_processed % (100 * SHARE_BLOCK_SIZE * k_threshold) == 0) {
-            cout << "  Processed " << bytes_written << " / " << orig_size << " bytes..." << endl;
-        }
     }
 
     // Close files
