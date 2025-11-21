@@ -5,6 +5,7 @@
 #include <vector>
 #include <string>
 #include <fstream>
+#include <iomanip>
 
 extern std::string save_path;
 
@@ -22,22 +23,22 @@ public:
         return "integrate <output_file> <share_file_1> <share_file_2> ..."; 
     }
     
-    // Need at least output file + 1 share to even attempt inspection
     int minArgs() const override { 
         return 2; 
     }
     
     int run(CommandContext& ctx) override {
-        // 1. Parse Arguments
-        // Syntax: integrate <output> <share1> <share2> ...
         std::string output_file = ctx.args[0];
+        
+        // Build full output path in save_path (like CompressCommand does)
+        std::filesystem::path full_output_path = std::filesystem::path(save_path) / output_file;
         
         std::vector<std::string> share_files;
         for(size_t i = 1; i < ctx.args.size(); i++) {
             share_files.push_back(ctx.args[i]);
         }
 
-        // 2. Validate Input Files
+        // Validate share files exist
         for (const auto& path : share_files) {
             if (!std::filesystem::exists(path)) {
                 Logger::Log(LOG_ERROR, "Share file not found: " + path);
@@ -45,63 +46,93 @@ public:
             }
         }
 
-        // 3. Read Metadata from the FIRST share to determine 'k'
-        // Header Format: [ID (1b)] [K (4b)] [Size (8b)] ...
+        // Read metadata from first share to determine k
         uint32_t k_required = 0;
+        uint64_t original_size = 0;
         try {
             std::ifstream probe(share_files[0], std::ios::binary);
             if (!probe) {
-                Logger::Log(LOG_ERROR, "Cannot open first share for inspection.");
+                Logger::Log(LOG_ERROR, "Cannot open first share: " + share_files[0]);
                 return 1;
             }
             
-            // Skip ID (1 byte)
-            probe.seekg(1, std::ios::cur);
-            
-            // Read K (4 bytes)
+            probe.seekg(1);  // Skip share ID
             probe.read(reinterpret_cast<char*>(&k_required), sizeof(uint32_t));
+            probe.read(reinterpret_cast<char*>(&original_size), sizeof(uint64_t));
             
-            if (!probe) {
-                Logger::Log(LOG_ERROR, "Failed to read header metadata.");
+            if (!probe || k_required < 1 || k_required > 255) {
+                Logger::Log(LOG_ERROR, "Invalid or corrupted share header");
                 return 1;
             }
         } catch (const std::exception& e) {
-            Logger::Log(LOG_ERROR, "Error inspecting file header: " + std::string(e.what()));
+            Logger::Log(LOG_ERROR, "Error reading share header: " + std::string(e.what()));
             return 1;
         }
 
-        Logger::Log(LOG_INFO, "Detected threshold k=" + std::to_string(k_required));
-
-        // 4. Logic Validation
-        if (k_required < 1 || k_required > 255) {
-            Logger::Log(LOG_ERROR, "Invalid threshold value detected in file header: " + std::to_string(k_required));
-            return 1;
-        }
+        // Display share information
+        Logger::Log(LOG_INFO, "Share Information:");
+        Logger::Log(LOG_INFO, "  Threshold (k): " + std::to_string(k_required));
+        Logger::Log(LOG_INFO, "  Shares provided: " + std::to_string(share_files.size()));
+        Logger::Log(LOG_INFO, "  Original file size: " + std::to_string(original_size) + " bytes");
 
         if (share_files.size() < k_required) {
-            Logger::Log(LOG_ERROR, "Not enough shares provided. Needed: " + std::to_string(k_required) + ", Provided: " + std::to_string(share_files.size()));
+            Logger::Log(LOG_ERROR, "Insufficient shares!");
+            Logger::Log(LOG_ERROR, "  Required: " + std::to_string(k_required));
+            Logger::Log(LOG_ERROR, "  Provided: " + std::to_string(share_files.size()));
             return 1;
         }
 
-        // 5. Execution
+        // Reconstruct
         try {
-            // Initialize SecretSharing. 
-            // We pass n=255 as a safe maximum because 'n' is not strictly used 
-            // in the reconstruction logic (only k is used to form the matrix), 
-            // but the constructor enforces n >= k.
-            SecretSharing ss(255, k_required);
+            SecretSharing ss(k_required, k_required);
             
-            Logger::Log(LOG_INFO, "Reconstructing to: " + output_file);
+            // Display reconstruction info using helper methods
+            Logger::Log(LOG_INFO, "Reconstruction Parameters:");
+            Logger::Log(LOG_INFO, "  Using threshold: " + std::to_string(ss.getThreshold()) + " shares");
+            Logger::Log(LOG_INFO, "  Output location: " + full_output_path.string());
             
-            if (!ss.integrateShares(share_files, output_file)) {
-                Logger::Log(LOG_ERROR, "Reconstruction failed (Check key shares or file integrity).");
+            if (share_files.size() > (size_t)ss.getThreshold()) {
+                Logger::Log(LOG_INFO, "  Excess shares: " + 
+                           std::to_string(share_files.size() - ss.getThreshold()) + 
+                           " (will use first " + std::to_string(ss.getThreshold()) + ")");
+            }
+            
+            Logger::Log(LOG_INFO, "Starting reconstruction...");
+            
+            if (!ss.integrateShares(share_files, full_output_path.string())) {
+                Logger::Log(LOG_ERROR, "Reconstruction failed");
+                Logger::Log(LOG_INFO, "Possible causes:");
+                Logger::Log(LOG_INFO, "  - Shares are from different split operations");
+                Logger::Log(LOG_INFO, "  - Share files are corrupted");
+                Logger::Log(LOG_INFO, "  - HMAC integrity check failed (tampering detected)");
+                Logger::Log(LOG_INFO, "  - Incompatible share versions");
                 return 1;
             }
             
-            Logger::Log(LOG_INFO, "Success!");
+            Logger::Log(LOG_INFO, "File reconstructed successfully!");
+            
+            // Verify and show output info
+            if (std::filesystem::exists(full_output_path)) {
+                auto size = std::filesystem::file_size(full_output_path);
+                Logger::Log(LOG_INFO, "Output: " + full_output_path.string());
+                Logger::Log(LOG_INFO, "  Size: " + std::to_string(size) + " bytes");
+                
+                if (size == original_size) {
+                    Logger::Log(LOG_INFO, "✓ Size matches original");
+                } else {
+                    Logger::Log(LOG_WARNING, "Size mismatch (expected: " + 
+                               std::to_string(original_size) + " bytes)");
+                }
+            }
 
+        } catch (const std::invalid_argument& e) {
+            Logger::Log(LOG_ERROR, "Invalid parameters: " + std::string(e.what()));
+            return 1;
+        } catch (const std::runtime_error& e) {
+            Logger::Log(LOG_ERROR, "Runtime error: " + std::string(e.what()));
+            return 1;
         } catch (const std::exception& e) {
-            Logger::Log(LOG_ERROR, "Internal Error: " + std::string(e.what()));
+            Logger::Log(LOG_ERROR, "Unexpected error: " + std::string(e.what()));
             return 1;
         }
 

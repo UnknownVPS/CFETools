@@ -61,13 +61,17 @@ public:
             return 1;
         }
         
+        // Build full output path in save_path
+        std::string base_name = std::filesystem::path(file).filename().stem().string();
+        std::filesystem::path output_prefix = std::filesystem::path(save_path) / base_name;
+        
         Logger::Log(LOG_INFO, "Splitting file into " + std::to_string(n_val) + " shares (need " + std::to_string(k_val) + " to recover)...");
+        Logger::Log(LOG_INFO, "Output location: " + save_path);
         
         // 4. Execution
         try {
             SecretSharing ss(n_val, k_val);
-            // Ensure output directory exists or handle paths
-            if (!ss.splitFile(file, std::filesystem::path(file).filename().stem().string())) {
+            if (!ss.splitFile(file, output_prefix.string())) {
                 Logger::Log(LOG_ERROR, "Failed to split file (check file permissions or disk space).");
                 return 1;
             }
