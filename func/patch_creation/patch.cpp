@@ -172,7 +172,9 @@ class OptimizedFastCDC {
 
     // Streaming insert from dst into patch
     static void emit_insert(std::ofstream& patch, std::ifstream& dst, uint64_t off, uint64_t len, std::vector<uint8_t>& buf){
-        if (len == 0) return; uint8_t cmd = 1; write_val(patch, cmd);
+        if (len == 0) return;
+        uint8_t cmd = 1;
+        write_val(patch, cmd);
         uint32_t len32 = static_cast<uint32_t>(len); // command format uses u32 length
         write_val(patch, len32);
         dst.clear(); dst.seekg(off);

@@ -1,6 +1,4 @@
-#ifndef FOLDER_HASHER_HPP
-#define FOLDER_HASHER_HPP
-
+#pragma once
 #include <string>
 #include <vector>
 #include <map>
@@ -207,6 +205,4 @@ public:
         
         return true;
     }
-};
-
-#endif // FOLDER_HASHER_HPP
+};  // FOLDER_HASHER_HPP

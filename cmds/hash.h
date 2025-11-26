@@ -7,6 +7,7 @@ extern bool shaEnabled;
 extern bool crcEnabled;
 extern bool noRecursionFlag;
 extern bool exportInfoFlag;
+extern std::string save_path;
 
 class HashCommand : public Command {
 public:

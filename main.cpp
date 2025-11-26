@@ -116,7 +116,7 @@ int main(int argc, char* argv[]) {
     for (int i = 1; i < argc; i++) {
         std::string arg = argv[i];
         if (arg == "-v" || arg == "--version" || arg == "version") {
-            Logger::Log(LOG_INFO, "CFET-Tools version: " VERSION);
+            Logger::Log(LOG_INFO, "CFETools version: " VERSION);
             Logger::Log(LOG_INFO, "Author: unknownpersonog");
             return 0;
         }
