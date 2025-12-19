@@ -91,6 +91,7 @@ void showHelp() {
     Logger::Log(LOG_INFO, "  -d, --debug          Enable debug logging");
     Logger::Log(LOG_INFO, "  -h, --help           Show this help message");
     Logger::Log(LOG_INFO, "  -v, --version        Show version information");
+    Logger::Log(LOG_INFO, "  -sp, --save-path     Use a custom save path");
     Logger::Log(LOG_INFO, "");
     Logger::Log(LOG_INFO, "AVAILABLE ARG GROUPS:");
     
