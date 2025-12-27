@@ -167,7 +167,7 @@ bool compressFile(const std::string& input_file, const std::string& output_file,
 
             ZSTD_freeCCtx(cctx);
             success = true;
-            algorithm_used = "ZSTD (Streaming MT)";
+            algorithm_used = "ZSTD MT";
 #else
             throw std::runtime_error("ZSTD not available");
 #endif
