@@ -5,7 +5,7 @@
 #include <stdexcept>
 #include <cstdint>
 #include <sodium.h>
-
+#include <sstream>
 // ---------------- XXHash header-only ----------------
 #define XXH_INLINE_ALL
 #include "xxhash.h"

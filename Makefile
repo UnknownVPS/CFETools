@@ -83,6 +83,7 @@ SRCS = utils/userinput/user_input.cpp \
        utils/compress/compress.cpp \
        utils/compress/decompress.cpp \
 	   utils/aio/aio_header.cpp \
+	   func/split_integrate/split_integrate.cpp \
        main.cpp
 
 OBJS = $(SRCS:.cpp=.o)
@@ -394,7 +395,7 @@ install-libsodium:
 			--host=aarch64-linux-android \
 			--prefix=$(PWD)/libsodium-android \
 			--disable-shared --enable-static \
-			--disable-pie --enable-minimal && \
+			--disable-pie && \
 		make clean && make -j4 && make install; \
 	fi
 

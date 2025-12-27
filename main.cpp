@@ -18,6 +18,8 @@ bool disableHash = false;
 std::string save_path = "";
 bool shaEnabled = false;
 bool crcEnabled = false;
+bool noRecursionFlag = false;
+bool exportInfoFlag = false;
 
 // Parse command line arguments into context
 CommandContext parseArgs(int argc, char* argv[]) {
@@ -63,6 +65,8 @@ void applyGlobalConfig(const CommandContext& ctx) {
     crcEnabled = ctx.boolFlags.count("crc") || ctx.boolFlags.count("crc32");
     save_path = ctx.flags.count("save-path") ? ctx.flags.at("save-path") :
                 (ctx.flags.count("sp") ? ctx.flags.at("sp") : save_path);
+    noRecursionFlag = ctx.boolFlags.count("no-recursion") || ctx.boolFlags.count("nr");
+    exportInfoFlag = ctx.boolFlags.count("export-info") || ctx.boolFlags.count("ei");
 }
 
 // Show help for all commands
@@ -87,6 +91,7 @@ void showHelp() {
     Logger::Log(LOG_INFO, "  -d, --debug          Enable debug logging");
     Logger::Log(LOG_INFO, "  -h, --help           Show this help message");
     Logger::Log(LOG_INFO, "  -v, --version        Show version information");
+    Logger::Log(LOG_INFO, "  -sp, --save-path     Use a custom save path");
     Logger::Log(LOG_INFO, "");
     Logger::Log(LOG_INFO, "AVAILABLE ARG GROUPS:");
     
@@ -112,7 +117,7 @@ int main(int argc, char* argv[]) {
     for (int i = 1; i < argc; i++) {
         std::string arg = argv[i];
         if (arg == "-v" || arg == "--version" || arg == "version") {
-            Logger::Log(LOG_INFO, "CFET-Tools version: " VERSION);
+            Logger::Log(LOG_INFO, "CFETools version: " VERSION);
             Logger::Log(LOG_INFO, "Author: unknownpersonog");
             return 0;
         }

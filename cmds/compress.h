@@ -33,7 +33,7 @@ public:
         }
         
         std::string output = ctx.args.size() >= 3 ? ctx.args[2] : 
-                             std::filesystem::path(file).filename().string() + ".cfmp";
+                             std::filesystem::path(file).filename().stem().string() + ".cfmp";
         
         // Build full output path in save_path
         std::filesystem::path packedFilePath = std::filesystem::path(save_path) / output;

@@ -5,7 +5,9 @@
 #include <chrono>
 #include <iomanip>
 #include <sstream>
-#include "compress.h"
+#include <memory>
+#include <thread> // For hardware_concurrency
+#include <cstdio> // For FILE*, fopen, fread, fwrite
 
 // Conditional includes based on available libraries
 #ifdef USE_ZSTD
@@ -20,37 +22,36 @@
 #include <lzma.h>
 #endif
 
-/**
- * Memory-efficient streaming file compression function
- * Handles files of any size by processing in chunks
- * 
- * @param input_file Path to input file to compress
- * @param output_file Path for compressed output file
- * @param compression_lvl Compression level (1-21)
- * @return bool true if compression successful, false otherwise
- */
+#include "compress.h"
+
 bool compressFile(const std::string& input_file, const std::string& output_file, int compression_lvl) {
     if (compression_lvl < 1 || compression_lvl > 21) {
         Logger::Log(LOG_ERROR, "Compression level must be between 1 and 21");
         return false;
     }
 
-    std::ifstream infile(input_file, std::ios::binary);
-    if (!infile.is_open()) {
+    // Use C-style file handles for lower overhead than std::fstream
+    // We do NOT use setvbuf with _IONBF here because it hurts performance on fast algorithms
+    // by disabling the OS/C library read-ahead cache.
+    FILE* infile = fopen(input_file.c_str(), "rb");
+    if (!infile) {
         Logger::Log(LOG_ERROR, "Cannot open input file: " + input_file);
         return false;
     }
 
-    infile.seekg(0, std::ios::end);
-    size_t file_size = infile.tellg();
-    infile.seekg(0, std::ios::beg);
+    fseek(infile, 0, SEEK_END);
+    size_t file_size = ftell(infile);
+    fseek(infile, 0, SEEK_SET);
+
     if (file_size == 0) {
+        fclose(infile);
         Logger::Log(LOG_ERROR, "Input file is empty");
         return false;
     }
 
-    std::ofstream outfile(output_file, std::ios::binary);
-    if (!outfile.is_open()) {
+    FILE* outfile = fopen(output_file.c_str(), "wb");
+    if (!outfile) {
+        fclose(infile);
         Logger::Log(LOG_ERROR, "Cannot create output file: " + output_file);
         return false;
     }
@@ -63,170 +64,117 @@ bool compressFile(const std::string& input_file, const std::string& output_file,
     const size_t CHUNK_SIZE = 4 * 1024 * 1024;
 
     try {
-        if (compression_lvl <= 3) {
-            // LZ4 Fast streaming compression
+        // Use unique_ptr to avoid zero-initialization overhead
+        std::unique_ptr<char[]> inBuf(new char[CHUNK_SIZE]);
+        std::unique_ptr<char[]> outBuf;
+        size_t outBufSize = 0;
+
+        if (compression_lvl <= 6) {
+            // LZ4 / LZ4-HC
 #ifdef USE_LZ4
-            Logger::Log(LOG_DEBUG, "Initializing LZ4 Fast compression context");
             LZ4F_preferences_t prefs{};
             prefs.frameInfo.blockMode = LZ4F_blockLinked;
             prefs.frameInfo.blockSizeID = LZ4F_max4MB;
-            prefs.compressionLevel = (compression_lvl == 1) ? 1 : (compression_lvl == 2) ? 3 : 6;
+            prefs.compressionLevel = (compression_lvl <= 3) ? 
+                ((compression_lvl == 1) ? 1 : (compression_lvl == 2) ? 3 : 6) :
+                ((compression_lvl == 4) ? 4 : (compression_lvl == 5) ? 7 : 9);
+
+            algorithm_used = (compression_lvl <= 3) ? "LZ4 Fast" : "LZ4-HC";
 
             LZ4F_compressionContext_t cctx;
             if (LZ4F_isError(LZ4F_createCompressionContext(&cctx, LZ4F_VERSION))) {
-                Logger::Log(LOG_ERROR, "LZ4F context creation failed");
-                return false;
+                throw std::runtime_error("LZ4F context creation failed");
             }
 
-            std::vector<char> inBuf(CHUNK_SIZE);
-            std::vector<char> outBuf(LZ4F_compressBound(CHUNK_SIZE, &prefs));
+            outBufSize = LZ4F_compressBound(CHUNK_SIZE, &prefs);
+            outBuf.reset(new char[outBufSize]);
 
-            size_t headerSize = LZ4F_compressBegin(cctx, outBuf.data(), outBuf.size(), &prefs);
-            if (LZ4F_isError(headerSize)) {
-                LZ4F_freeCompressionContext(cctx);
-                Logger::Log(LOG_ERROR, "LZ4 header creation failed");
-                return false;
-            }
-            outfile.write(outBuf.data(), headerSize);
+            size_t headerSize = LZ4F_compressBegin(cctx, outBuf.get(), outBufSize, &prefs);
+            if (LZ4F_isError(headerSize)) throw std::runtime_error("LZ4 header creation failed");
+            
+            fwrite(outBuf.get(), 1, headerSize, outfile);
             total_compressed += headerSize;
 
-            while (infile) {
-                infile.read(inBuf.data(), CHUNK_SIZE);
-                std::streamsize bytesRead = infile.gcount();
-                if (bytesRead <= 0) break;
+            while (true) {
+                size_t bytesRead = fread(inBuf.get(), 1, CHUNK_SIZE, infile);
+                if (bytesRead == 0) break; // EOF or Error
 
                 size_t compressedSize = LZ4F_compressUpdate(
-                    cctx, outBuf.data(), outBuf.size(), 
-                    inBuf.data(), bytesRead, nullptr
+                    cctx, outBuf.get(), outBufSize, 
+                    inBuf.get(), bytesRead, nullptr
                 );
-                if (LZ4F_isError(compressedSize)) {
-                    LZ4F_freeCompressionContext(cctx);
-                    Logger::Log(LOG_ERROR, "LZ4 compression error during update");
-                    return false;
-                }
-                outfile.write(outBuf.data(), compressedSize);
+                if (LZ4F_isError(compressedSize)) throw std::runtime_error("LZ4 compression error");
+
+                fwrite(outBuf.get(), 1, compressedSize, outfile);
                 total_compressed += compressedSize;
             }
 
-            size_t finalSize = LZ4F_compressEnd(cctx, outBuf.data(), outBuf.size(), nullptr);
+            size_t finalSize = LZ4F_compressEnd(cctx, outBuf.get(), outBufSize, nullptr);
             if (!LZ4F_isError(finalSize)) {
-                outfile.write(outBuf.data(), finalSize);
+                fwrite(outBuf.get(), 1, finalSize, outfile);
                 total_compressed += finalSize;
                 success = true;
-                algorithm_used = "LZ4 Fast";
             }
             LZ4F_freeCompressionContext(cctx);
 #else
-            Logger::Log(LOG_ERROR, "LZ4 not available");
-#endif
-        }
-        else if (compression_lvl <= 6) {
-            // LZ4-HC streaming compression
-#ifdef USE_LZ4
-            Logger::Log(LOG_DEBUG, "Initializing LZ4-HC compression context");
-            LZ4F_preferences_t prefs{};
-            prefs.frameInfo.blockMode = LZ4F_blockLinked;
-            prefs.frameInfo.blockSizeID = LZ4F_max4MB;
-            prefs.compressionLevel = (compression_lvl == 4) ? 4 : (compression_lvl == 5) ? 7 : 9;
-
-            LZ4F_compressionContext_t cctx;
-            if (LZ4F_isError(LZ4F_createCompressionContext(&cctx, LZ4F_VERSION))) {
-                Logger::Log(LOG_ERROR, "LZ4-HC context creation failed");
-                return false;
-            }
-
-            std::vector<char> inBuf(CHUNK_SIZE);
-            std::vector<char> outBuf(LZ4F_compressBound(CHUNK_SIZE, &prefs));
-
-            size_t headerSize = LZ4F_compressBegin(cctx, outBuf.data(), outBuf.size(), &prefs);
-            if (LZ4F_isError(headerSize)) {
-                LZ4F_freeCompressionContext(cctx);
-                Logger::Log(LOG_ERROR, "LZ4-HC header creation failed");
-                return false;
-            }
-            outfile.write(outBuf.data(), headerSize);
-            total_compressed += headerSize;
-
-            while (infile) {
-                infile.read(inBuf.data(), CHUNK_SIZE);
-                std::streamsize bytesRead = infile.gcount();
-                if (bytesRead <= 0) break;
-
-                size_t compressedSize = LZ4F_compressUpdate(
-                    cctx, outBuf.data(), outBuf.size(), 
-                    inBuf.data(), bytesRead, nullptr
-                );
-                if (LZ4F_isError(compressedSize)) {
-                    LZ4F_freeCompressionContext(cctx);
-                    Logger::Log(LOG_ERROR, "LZ4-HC compression error during update");
-                    return false;
-                }
-                outfile.write(outBuf.data(), compressedSize);
-                total_compressed += compressedSize;
-            }
-
-            size_t finalSize = LZ4F_compressEnd(cctx, outBuf.data(), outBuf.size(), nullptr);
-            if (!LZ4F_isError(finalSize)) {
-                outfile.write(outBuf.data(), finalSize);
-                total_compressed += finalSize;
-                success = true;
-                algorithm_used = "LZ4-HC";
-            }
-            LZ4F_freeCompressionContext(cctx);
-#else
-            Logger::Log(LOG_ERROR, "LZ4 not available");
+            throw std::runtime_error("LZ4 not available");
 #endif
         }
         else if (compression_lvl <= 15) {
             // ZSTD streaming compression
 #ifdef USE_ZSTD
-            Logger::Log(LOG_DEBUG, "Initializing ZSTD compression context");
             ZSTD_CCtx* cctx = ZSTD_createCCtx();
-            if (!cctx) {
-                Logger::Log(LOG_ERROR, "ZSTD context creation failed");
-                return false;
-            }
+            if (!cctx) throw std::runtime_error("ZSTD context creation failed");
 
             int zstd_level = std::min(19, compression_lvl + 5);
             ZSTD_CCtx_setParameter(cctx, ZSTD_c_compressionLevel, zstd_level);
+            
+            // Enable Multithreading
+            unsigned nbWorkers = std::thread::hardware_concurrency();
+            if (nbWorkers > 1) {
+                ZSTD_CCtx_setParameter(cctx, ZSTD_c_nbWorkers, nbWorkers);
+            }
 
-            std::vector<char> inBuf(CHUNK_SIZE);
-            std::vector<char> outBuf(ZSTD_compressBound(CHUNK_SIZE));
+            outBufSize = ZSTD_compressBound(CHUNK_SIZE);
+            outBuf.reset(new char[outBufSize]);
 
-            while (infile) {
-                infile.read(inBuf.data(), CHUNK_SIZE);
-                std::streamsize bytesRead = infile.gcount();
-                if (bytesRead <= 0) break;
+            ZSTD_EndDirective mode = ZSTD_e_continue;
+            size_t bytesRead = 0;
+            
+            do {
+                bytesRead = fread(inBuf.get(), 1, CHUNK_SIZE, infile);
+                // If we read less than chunk size, we might be at EOF. Check strictly.
+                if (bytesRead < CHUNK_SIZE && feof(infile)) {
+                    mode = ZSTD_e_end;
+                } else if (bytesRead == 0 && feof(infile)) {
+                    mode = ZSTD_e_end;
+                }
 
-                ZSTD_EndDirective mode = infile.eof() ? ZSTD_e_end : ZSTD_e_continue;
-                ZSTD_inBuffer input = { inBuf.data(), static_cast<size_t>(bytesRead), 0 };
+                ZSTD_inBuffer input = { inBuf.get(), bytesRead, 0 };
 
                 bool finished = false;
                 while (!finished) {
-                    ZSTD_outBuffer output = { outBuf.data(), outBuf.size(), 0 };
+                    ZSTD_outBuffer output = { outBuf.get(), outBufSize, 0 };
                     size_t remaining = ZSTD_compressStream2(cctx, &output, &input, mode);
-                    if (ZSTD_isError(remaining)) {
-                        ZSTD_freeCCtx(cctx);
-                        Logger::Log(LOG_ERROR, "ZSTD compression error during update");
-                        return false;
-                    }
-                    outfile.write(static_cast<char*>(output.dst), output.pos);
+                    if (ZSTD_isError(remaining)) throw std::runtime_error("ZSTD compression error");
+
+                    fwrite(outBuf.get(), 1, output.pos, outfile);
                     total_compressed += output.pos;
+
                     finished = (mode == ZSTD_e_end) ? (remaining == 0) : (input.pos == input.size);
                 }
-            }
+            } while (bytesRead == CHUNK_SIZE); 
 
             ZSTD_freeCCtx(cctx);
             success = true;
-            algorithm_used = "ZSTD";
+            algorithm_used = "ZSTD MT";
 #else
-            Logger::Log(LOG_ERROR, "ZSTD not available");
+            throw std::runtime_error("ZSTD not available");
 #endif
         }
         else {
             // LZMA2 streaming compression
 #ifdef USE_LIBLZMA
-            Logger::Log(LOG_DEBUG, "Initializing LZMA2 compression context");
             lzma_stream strm = LZMA_STREAM_INIT;
             lzma_options_lzma opt_lzma;
             lzma_lzma_preset(&opt_lzma, 9 | LZMA_PRESET_EXTREME);
@@ -266,32 +214,39 @@ bool compressFile(const std::string& input_file, const std::string& output_file,
             }
 
             if (lzma_stream_encoder(&strm, filters, LZMA_CHECK_CRC64) != LZMA_OK) {
-                Logger::Log(LOG_ERROR, "LZMA encoder initialization failed");
-                return false;
+                throw std::runtime_error("LZMA encoder initialization failed");
             }
 
-            std::vector<uint8_t> inBuf(CHUNK_SIZE);
-            std::vector<uint8_t> outBuf(CHUNK_SIZE);
+            outBufSize = CHUNK_SIZE; 
+            outBuf.reset(new char[outBufSize]);
+
             lzma_action action = LZMA_RUN;
+            size_t bytesRead = 0;
 
             while (true) {
-                if (strm.avail_in == 0 && !infile.eof()) {
-                    infile.read(reinterpret_cast<char*>(inBuf.data()), CHUNK_SIZE);
-                    std::streamsize bytesRead = infile.gcount();
-                    strm.next_in = inBuf.data();
+                // Only read if buffer is empty and we are not at EOF
+                if (strm.avail_in == 0 && !feof(infile)) {
+                    bytesRead = fread(inBuf.get(), 1, CHUNK_SIZE, infile);
+                    strm.next_in = reinterpret_cast<uint8_t*>(inBuf.get());
                     strm.avail_in = bytesRead;
-                    if (infile.eof()) {
+                    
+                    if (feof(infile)) {
                         action = LZMA_FINISH;
                     }
                 }
 
-                strm.next_out = outBuf.data();
-                strm.avail_out = outBuf.size();
+                // If we have no input left and we hit EOF previously, we might just need to flush
+                if (strm.avail_in == 0 && feof(infile) && action != LZMA_FINISH) {
+                     action = LZMA_FINISH;
+                }
+
+                strm.next_out = reinterpret_cast<uint8_t*>(outBuf.get());
+                strm.avail_out = outBufSize;
                 lzma_ret ret = lzma_code(&strm, action);
 
-                size_t write_size = outBuf.size() - strm.avail_out;
+                size_t write_size = outBufSize - strm.avail_out;
                 if (write_size > 0) {
-                    outfile.write(reinterpret_cast<char*>(outBuf.data()), write_size);
+                    fwrite(outBuf.get(), 1, write_size, outfile);
                     total_compressed += write_size;
                 }
 
@@ -301,13 +256,12 @@ bool compressFile(const std::string& input_file, const std::string& output_file,
                 } else if (ret != LZMA_OK) {
                     std::ostringstream oss;
                     oss << "LZMA compression error: code " << ret;
-                    Logger::Log(LOG_ERROR, oss.str());
-                    break;
+                    throw std::runtime_error(oss.str());
                 }
             }
             lzma_end(&strm);
 #else
-            Logger::Log(LOG_ERROR, "liblzma not available");
+            throw std::runtime_error("liblzma not available");
 #endif
         }
     } catch (const std::exception& e) {
@@ -315,8 +269,8 @@ bool compressFile(const std::string& input_file, const std::string& output_file,
         success = false;
     }
 
-    infile.close();
-    outfile.close();
+    fclose(infile);
+    fclose(outfile);
 
     auto end = std::chrono::high_resolution_clock::now();
     double time_ms = std::chrono::duration<double, std::milli>(end - start).count();
@@ -338,16 +292,7 @@ bool compressFile(const std::string& input_file, const std::string& output_file,
         return true;
     } else {
         Logger::Log(LOG_ERROR, "Compression failed");
+        std::remove(output_file.c_str());
         return false;
     }
-}
-
-// Helper function to get algorithm name for a given level
-std::string getAlgorithmName(int compression_lvl) {
-    if (compression_lvl <= 3) return "LZ4_Fast";
-    else if (compression_lvl <= 6) return "LZ4-HC";
-    else if (compression_lvl <= 15) return "ZSTD";
-    else if (compression_lvl <= 17) return "LZMA2_Ultra";
-    else if (compression_lvl <= 19) return "LZMA2_Maximum";
-    else return "LZMA2_Extreme";
 }

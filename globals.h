@@ -11,5 +11,7 @@ extern bool disableHash;
 extern std::string save_path;
 extern bool shaEnabled;
 extern bool crcEnabled;
+extern bool noRecursionFlag;
+extern bool exportInfoFlag;
 
 #endif // GLOBALS_H
