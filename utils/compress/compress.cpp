@@ -79,7 +79,7 @@ bool compressFile(const std::string& input_file, const std::string& output_file,
                 ((compression_lvl == 1) ? 1 : (compression_lvl == 2) ? 3 : 6) :
                 ((compression_lvl == 4) ? 4 : (compression_lvl == 5) ? 7 : 9);
 
-            algorithm_used = (compression_lvl <= 3) ? "LZ4 Fast (Streaming)" : "LZ4-HC (Streaming)";
+            algorithm_used = (compression_lvl <= 3) ? "LZ4 Fast" : "LZ4-HC";
 
             LZ4F_compressionContext_t cctx;
             if (LZ4F_isError(LZ4F_createCompressionContext(&cctx, LZ4F_VERSION))) {
@@ -182,15 +182,15 @@ bool compressFile(const std::string& input_file, const std::string& output_file,
             if (compression_lvl <= 17) {
                 opt_lzma.dict_size = (compression_lvl == 16) ? (64U << 20) : (128U << 20);
                 opt_lzma.depth = 512;
-                algorithm_used = "LZMA2 Ultra (Streaming)";
+                algorithm_used = "LZMA2 Ultra";
             } else if (compression_lvl <= 19) {
                 opt_lzma.dict_size = (compression_lvl == 18) ? (128U << 20) : (256U << 20);
                 opt_lzma.depth = 1000;
-                algorithm_used = "LZMA2 Maximum (Streaming)";
+                algorithm_used = "LZMA2 Maximum";
             } else {
                 opt_lzma.dict_size = (compression_lvl == 20) ? (128U << 20) : (256U << 20);
                 opt_lzma.depth = 2000;
-                algorithm_used = "LZMA2 Extreme (Streaming)";
+                algorithm_used = "LZMA2 Extreme";
             }
 
             opt_lzma.nice_len = 273;
