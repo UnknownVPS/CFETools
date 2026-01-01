@@ -1,7 +1,7 @@
 name: Build Multi-Platform Binaries
 on:
   push:
-    branches: [ main, axle ]
+    branches: [ main, bearing ]
   pull_request:
     branches: [ main ]
   workflow_dispatch:
@@ -31,19 +31,13 @@ jobs:
           mv android-ndk-r27c $HOME/android-ndk-r27c
       
       - name: Update Makefile for CI path
-        run: sed -i "s|/home/codespace/android-ndk-r27c|$HOME/android-ndk-r27c|g" Makefile
+        run: export ANDROID_NDK=$HOME/android-ndk-r27c
       
-      - name: Install libsodium for Linux/Android
-        run: make install-libsodium && make build-libzip-linux
+      - name: Download prebuilt libs
+        run: wget https://files.unknownvps.eu.org/get/file/prebuilt-libs.zip
       
-      - name: Install libsodium for Windows
-        run: make install-libsodium-win
-
-      - name: Build compressors for Android
-        run: make build-compressors-android && make build-libzip-android
-      
-      - name: Build compressors for Windows
-        run: make build-compressors-win && make build-libzip-win
+      - name: Unzip prebuilt libs
+        run: munzip -q prebuilt-libs.zip
 
       - name: Build all distributions
         run: make clean && make dist && mv cfx cfx-linux
@@ -68,7 +62,7 @@ jobs:
   create-release:
     needs: [build]
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/axle'
+    if: github.ref == 'refs/heads/main'
     steps:
       - name: Download all artifacts
         uses: actions/download-artifact@v4
