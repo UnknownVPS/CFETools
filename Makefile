@@ -424,7 +424,9 @@ clean-all: clean
 	rm -rf libsodium-1.0.20 libsodium-1.0.20.tar.gz libsodium-android libsodium-win \
 	       $(LZ4_DIR) $(LZ4_TARBALL) $(ZSTD_DIR) $(ZSTD_TARBALL) $(XZ_DIR) $(XZ_TARBALL) $(ZLIB_DIR) $(ZLIB_TARBALL) \
 	       $(LZ4_ANDROID_ROOT) $(ZSTD_ANDROID_ROOT) $(XZ_ANDROID_ROOT) $(ZLIB_ANDROID_ROOT) \
-	       $(LZ4_WIN_ROOT) $(ZSTD_WIN_ROOT) $(XZ_WIN_ROOT) $(ZLIB_WIN_ROOT)
+	       $(LZ4_WIN_ROOT) $(ZSTD_WIN_ROOT) $(XZ_WIN_ROOT) $(ZLIB_WIN_ROOT) \
+		   $(LIBZIP_DIR) $(LIBZIP_TARBALL) \
+	       $(LIBZIP_LINUX_ROOT) $(LIBZIP_ANDROID_ROOT) $(LIBZIP_WIN_ROOT)
 
 # === Help ===
 help:
