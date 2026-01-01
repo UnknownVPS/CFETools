@@ -26,7 +26,7 @@ jobs:
       
       - name: Setup Android NDK
         run: |
-          wget https://dl.google.com/android/repository/android-ndk-r27c-linux.zip
+          wget -q https://dl.google.com/android/repository/android-ndk-r27c-linux.zip
           unzip -q android-ndk-r27c-linux.zip
           mv android-ndk-r27c $HOME/android-ndk-r27c
       
@@ -34,10 +34,10 @@ jobs:
         run: export ANDROID_NDK=$HOME/android-ndk-r27c
       
       - name: Download prebuilt libs
-        run: wget https://files.unknownvps.eu.org/get/file/prebuilt-libs.zip
+        run: wget -q https://files.unknownvps.eu.org/get/file/prebuilt-libs.zip
       
       - name: Unzip prebuilt libs
-        run: munzip -q prebuilt-libs.zip
+        run: unzip -q prebuilt-libs.zip
 
       - name: Build all distributions
         run: make clean && make dist && mv cfx cfx-linux
