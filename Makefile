@@ -2,9 +2,9 @@
 CXX = g++
 WIN_CXX = x86_64-w64-mingw32-g++
 ANDROID_NDK ?= /home/codespace/android-ndk-r27c
-ANDROID_CXX = $(ANDROID_NDK)/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang++
+ANDROID_CXX = $(ANDROID_NDK)/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android24-clang++
 # Add C compilers for building C-based compressor libs
-ANDROID_CC = $(ANDROID_NDK)/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang
+ANDROID_CC = $(ANDROID_NDK)/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android24-clang
 WIN_CC = x86_64-w64-mingw32-gcc
 
 # === Libsodium paths ===
