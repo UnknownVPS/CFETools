@@ -14,3 +14,4 @@
 #include "ztc.h"
 #include "split.h"
 #include "integrate.h"
+#include "server.h"
