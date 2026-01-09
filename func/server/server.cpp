@@ -7,6 +7,8 @@
 #include <iomanip>
 #include <vector>
 #include <iostream>
+#include <memory>
+#include <array> // Added for stack allocation
 
 namespace fs = std::filesystem;
 
@@ -27,11 +29,9 @@ namespace {
     }
 
     std::string resolve_safe_path(const std::string& root_path, const std::string& url_path) {
-        // Use canonical to resolve absolute path and remove any trailing dots or symlinks
         std::error_code ec;
         fs::path base = fs::canonical(root_path, ec);
         if (ec) {
-            // Fallback to absolute if canonical fails (e.g. directory doesn't exist)
             base = fs::absolute(root_path).lexically_normal();
         } else {
             base = base.lexically_normal();
@@ -43,13 +43,11 @@ namespace {
 
         fs::path combined = (base / fs::path(rel_url)).lexically_normal();
 
-        // Safe prefix check using 4-argument mismatch to prevent reading past end of shorter path
         auto [mismatch_base, mismatch_combined] = std::mismatch(
             base.begin(), base.end(),
             combined.begin(), combined.end()
         );
 
-        // If base is a prefix of combined, mismatch_base must reach base.end()
         if (mismatch_base != base.end())
             return "";
 
@@ -219,30 +217,88 @@ int start_server(const std::string& root_path, int port) {
             }
             serve_directory(p, url_path, res);
         } else {
-            // Serve file content using a provider for memory efficiency (streaming)
-            size_t file_size = fs::file_size(p);
-            
-            res.set_content_provider(
-                file_size,
-                "application/octet-stream",
-                [p](size_t offset, size_t length, httplib::DataSink &sink) {
-                    std::ifstream file(p, std::ios::binary);
-                    if (!file) return false;
-                    
-                    file.seekg(offset);
-                    std::vector<char> buffer(std::min<size_t>(65536, length));
-                    
-                    while (length > 0) {
-                        size_t to_read = std::min(buffer.size(), length);
-                        file.read(buffer.data(), to_read);
-                        size_t read = file.gcount();
-                        
-                        if (read == 0) break;
-                        
-                        if (!sink.write(buffer.data(), read)) return false;
-                        
-                        length -= read;
+            std::error_code ec;
+            uintmax_t file_size = fs::file_size(p, ec);
+            if (ec) {
+                res.status = 500;
+                res.set_content("Could not determine file size", "text/plain");
+                return;
+            }
+
+            // 1. Parse Range Header (Pause/Resume)
+            std::string range_header = req.get_header_value("Range");
+            uintmax_t start = 0;
+            uintmax_t end = file_size - 1;
+            bool is_range = false;
+
+            if (!range_header.empty()) {
+                if (range_header.find("bytes=") == 0) {
+                    std::string range_spec = range_header.substr(6);
+                    size_t dash_pos = range_spec.find('-');
+                    if (dash_pos != std::string::npos) {
+                        try {
+                            std::string s_start = range_spec.substr(0, dash_pos);
+                            std::string s_end = range_spec.substr(dash_pos + 1);
+
+                            if (!s_start.empty()) start = std::stoull(s_start);
+                            if (!s_end.empty()) end = std::stoull(s_end);
+                            else end = file_size - 1;
+
+                            if (start < file_size && end < file_size && start <= end) {
+                                is_range = true;
+                            }
+                        } catch (...) { /* Ignore invalid range */ }
                     }
+                }
+            }
+
+            uintmax_t content_length = is_range ? (end - start + 1) : file_size;
+
+            // 2. Open File (Shared pointer to keep alive across callbacks)
+            auto file_ptr = std::make_shared<std::ifstream>(p, std::ios::binary);
+            if (!file_ptr->is_open()) {
+                res.status = 500;
+                res.set_content("Failed to open file", "text/plain");
+                return;
+            }
+
+            // 3. Set Headers
+            if (is_range) {
+                res.status = 206;
+                std::string content_range = "bytes " + std::to_string(start) + "-" + std::to_string(end) + "/" + std::to_string(file_size);
+                res.set_header("Content-Range", content_range.c_str());
+            } else {
+                res.status = 200;
+                res.set_header("Accept-Ranges", "bytes");
+            }
+
+            // 4. Content Provider with Efficient Streaming
+            res.set_content_provider(
+                content_length,
+                "application/octet-stream",
+                [file_ptr, start, is_range](size_t offset, size_t length, httplib::DataSink &sink) {
+                    // Calculate actual file position
+                    uintmax_t file_pos = start + offset;
+
+                    file_ptr->clear();
+                    file_ptr->seekg(file_pos);
+                    
+                    if (!file_ptr->good()) return false;
+
+                    // Use std::array for stack allocation (zero heap allocation overhead)
+                    // You can increase this to 1MB (1024*1024) if on a 10Gbps network
+                    const size_t chunk_size = 64 * 1024; 
+                    std::array<char, chunk_size> buffer; 
+
+                    size_t to_read = std::min(length, chunk_size);
+                    
+                    file_ptr->read(buffer.data(), to_read);
+                    size_t read_count = file_ptr->gcount();
+
+                    if (read_count > 0) {
+                        sink.write(buffer.data(), read_count);
+                    }
+                    
                     return true;
                 }
             );
