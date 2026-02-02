@@ -501,20 +501,24 @@ int start_server(const std::string& root_path, int port) {
         std::string combined_str = combined.string();
         std::string root_str = real_root.string();
         
+        // On Windows, preferred_separator is wchar_t, but we are using std::string (char).
+        // We need to cast it to char for string operations.
+        const char path_sep = static_cast<char>(fs::path::preferred_separator);
+
         // Ensure root_str ends with separator for accurate prefix matching
-        if (!root_str.empty() && root_str.back() != fs::path::preferred_separator) {
-            root_str += fs::path::preferred_separator;
+        if (!root_str.empty() && root_str.back() != path_sep) {
+            root_str += path_sep;
         }
-        if (!combined_str.empty() && combined_str.back() != fs::path::preferred_separator 
+        if (!combined_str.empty() && combined_str.back() != path_sep 
             && fs::is_directory(combined)) {
-            combined_str += fs::path::preferred_separator;
+            combined_str += path_sep;
         }
 
         // Check if combined path starts with root path
         if (combined_str.size() < root_str.size() || 
             combined_str.substr(0, root_str.size()) != root_str) {
             // Allow exact match with root
-            if (combined_str + fs::path::preferred_separator != root_str) {
+            if (combined_str + path_sep != root_str) {
                 return ""; // Path traversal detected
             }
         }
