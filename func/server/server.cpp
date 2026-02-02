@@ -167,7 +167,8 @@ namespace {
         auto time_since_epoch = last_write.time_since_epoch().count();
         
         std::ostringstream ss;
-        ss << "\"" << std::hex << file_size << "-" << time_since_epoch << "\"";
+        // Cast time_since_epoch to unsigned long long to support platforms where it is __int128 (e.g. Android NDK)
+        ss << "\"" << std::hex << file_size << "-" << static_cast<unsigned long long>(time_since_epoch) << "\"";
         return ss.str();
     }
 
