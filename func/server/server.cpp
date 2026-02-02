@@ -15,18 +15,18 @@
 #include <csignal>
 #include <atomic>
 #include <thread>
+
 namespace fs = std::filesystem;
 
 namespace {
     // Global server pointer for signal handling
     std::atomic<httplib::Server*> g_server_ptr{nullptr};
-    unsigned int n = std::thread::hardware_concurrency();
 
     // Configuration
     struct Config {
         bool show_hidden = false;
         size_t page_size = 100;
-        int thread_pool_size = n;
+        int thread_pool_size = 1;
         bool follow_symlinks = false;
     } g_config;
 
@@ -202,7 +202,7 @@ namespace {
         return html.str();
     }
 
-    // Parse query parameters
+    // Parse query parameters 
     std::unordered_map<std::string, std::string> parse_query(const std::string& query) {
         std::unordered_map<std::string, std::string> params;
         if (query.empty()) return params;
@@ -449,7 +449,13 @@ namespace {
     }
 }
 
-int start_server(const std::string& root_path, int port) {
+// Updated signature to accept page_size and thread_pool_size
+int start_server(const std::string& root_path, int port, size_t page_size, int thread_pool_size) {
+    // Update global config
+    g_config.page_size = page_size;
+    // Ensure at least 1 thread
+    g_config.thread_pool_size = (thread_pool_size > 0) ? thread_pool_size : 1; 
+
     httplib::Server svr;
 
     // Setup signal handlers for graceful shutdown
@@ -572,11 +578,11 @@ int start_server(const std::string& root_path, int port) {
                 return;
             }
             
-            auto query_params = parse_query(req.get_header_value("Query-String"));
-            // Also parse from URL if httplib doesn't provide it
-            size_t query_pos = req.path.find('?');
-            if (query_pos != std::string::npos) {
-                query_params = parse_query(req.path.substr(query_pos + 1));
+            // FIX: httplib parses query strings into req.params automatically.
+            // We use req.params instead of manually parsing req.path.
+            std::unordered_map<std::string, std::string> query_params;
+            for (const auto& param : req.params) {
+                query_params[param.first] = param.second;
             }
             
             serve_directory(p, url_path, query_params, res);

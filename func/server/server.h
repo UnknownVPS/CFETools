@@ -8,4 +8,4 @@
  * @param port The port to listen on.
  * @return int 0 on success, non-zero on failure.
  */
-int start_server(const std::string& root_path, int port);
+int start_server(const std::string& root_path, int port, size_t page_size, int thread_pool_size);
