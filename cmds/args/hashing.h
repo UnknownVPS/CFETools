@@ -9,10 +9,8 @@ public:
     
     std::vector<ArgDef> definitions() const override {
         return {
-            ArgDef("sha", "", "Enable SHA-256 hashing", true),
-            ArgDef("sha256", "", "Enable SHA-256 hashing", true),
-            ArgDef("crc", "", "Enable CRC32 hashing", true),
-            ArgDef("crc32", "", "Enable CRC32 hashing", true),
+            ArgDef("sha256", "sha", "Enable SHA-256 hashing", true),
+            ArgDef("crc32", "crc", "Enable CRC32 hashing", true),
             ArgDef("no-recursion", "nr", "Process folders without recursion", true),
             ArgDef("export-info", "ei", "Export folder hash info to a text file", true),
         };

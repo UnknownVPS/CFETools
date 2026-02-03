@@ -450,11 +450,12 @@ namespace {
 }
 
 // Updated signature to accept page_size and thread_pool_size
-int start_server(const std::string& root_path, int port, size_t page_size, int thread_pool_size) {
+int start_server(const std::string& root_path, int port, size_t page_size, int thread_pool_size, bool symlinks_enabled) {
     // Update global config
     g_config.page_size = page_size;
     // Ensure at least 1 thread
     g_config.thread_pool_size = (thread_pool_size > 0) ? thread_pool_size : 1; 
+    g_config.follow_symlinks = symlinks_enabled;
 
     httplib::Server svr;
 
@@ -562,13 +563,41 @@ int start_server(const std::string& root_path, int port, size_t page_size, int t
         }
 
         // Handle symlinks based on config
-        std::error_code symlink_ec;
-        bool is_symlink = fs::is_symlink(p, symlink_ec);
-        
-        if (!symlink_ec && is_symlink && !g_config.follow_symlinks) {
-            res.status = 403;
-            res.set_content(generate_error_page(403, "Forbidden", "Symbolic links are not followed"), "text/html");
-            return;
+        if (!g_config.follow_symlinks) {
+            std::error_code ec;
+            
+            // 1. Get the physical path (resolves all symlinks)
+            fs::path canonical_path = fs::canonical(p, ec);
+
+            if (!ec) {
+                // Helper lambda to remove trailing separators for fair comparison
+                auto normalize_path_str = [](const std::string& path) -> std::string {
+                    std::string res = path;
+                    const char sep = static_cast<char>(fs::path::preferred_separator);
+                    // Remove trailing slashes
+                    while (!res.empty() && res.back() == sep) {
+                        res.pop_back();
+                    }
+                    return res;
+                };
+
+                // Compare normalized strings
+                std::string req_str = normalize_path_str(p.string());
+                std::string real_str = normalize_path_str(canonical_path.string());
+
+                if (req_str != real_str) {
+                    res.status = 403;
+                    res.set_content(generate_error_page(403, "Forbidden", "Symbolic links are not followed"), "text/html");
+                    return;
+                }
+            } else {
+                // Fallback for broken symlinks (where canonical might fail)
+                if (fs::is_symlink(p, ec) && !ec) {
+                    res.status = 403;
+                    res.set_content(generate_error_page(403, "Forbidden", "Symbolic links are not followed"), "text/html");
+                    return;
+                }
+            }
         }
 
         // Handle directories
@@ -718,6 +747,7 @@ int start_server(const std::string& root_path, int port, size_t page_size, int t
     std::cout << "Directory:  " << real_root << std::endl;
     std::cout << "Threads:    " << g_config.thread_pool_size << std::endl;
     std::cout << "Page Size:  " << g_config.page_size << " items" << std::endl;
+    std::cout << "Symlinks:   " << (g_config.follow_symlinks ? "Enabled" : "Disabled") << std::endl;
     std::cout << "========================================" << std::endl;
     std::cout << "Press Ctrl+C to stop the server" << std::endl;
     std::cout << std::endl;

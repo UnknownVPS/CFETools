@@ -50,9 +50,15 @@ public:
         } else if (std::thread::hardware_concurrency() > 0) {
             threads = static_cast<int>(std::thread::hardware_concurrency());
         }
-        Logger::Log(LOG_INFO, "Starting server for folder: " + folder + " on port " + std::to_string(port) + " with page size " + std::to_string(page_size) + " and thread pool size " + std::to_string(threads));
+        bool symlinks_enabled = false;
+        if (ctx.boolFlags.count("symlinks")) {
+            symlinks_enabled = ctx.boolFlags.at("symlinks");
+        } else if (ctx.boolFlags.count("sl")) {
+            symlinks_enabled = ctx.boolFlags.at("sl");
+        }
+        Logger::Log(LOG_INFO, "Starting server for folder: " + folder + " on port " + std::to_string(port) + " with page size " + std::to_string(page_size) + " and thread pool size " + std::to_string(threads) + " and symlinks enabled: " + (symlinks_enabled ? "true" : "false"));
         
-        return start_server(folder, port, page_size, threads);
+        return start_server(folder, port, page_size, threads, symlinks_enabled);
     }
 };
 

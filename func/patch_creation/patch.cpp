@@ -7,7 +7,14 @@
 #include <cstring>
 #include <array>
 #include <stdexcept>
-#include "patch.h"
+#include <algorithm>
+#include <sstream>
+#include <iomanip>
+#include <cerrno>
+#include "../../utils/logger/logger.h"
+#include "../../version.h"
+#include "../../utils/hashers/fileHasher.hpp"
+
 // -------------------------- Parameters --------------------------
 constexpr size_t MICRO_MIN = 256;
 constexpr size_t MICRO_AVG = 512;
@@ -86,7 +93,7 @@ public:
     inline void reset() { hash = 0; }
 };
 
-// -------------------------- Hash --------------------------
+// -------------------------- Fast Hash (Content Defined) --------------------------
 static inline uint64_t ultraFastHash(const uint8_t* data, size_t len) {
     uint64_t h = 0xcbf29ce484222325ULL;
     const uint64_t prime = 0x100000001b3ULL;
@@ -101,7 +108,7 @@ static inline uint64_t ultraFastHash(const uint8_t* data, size_t len) {
 
 struct MultiLevelChunk { uint64_t pos; uint32_t len; uint64_t hash; uint8_t level; };
 
-// -------------------------- Bloom --------------------------
+// -------------------------- Bloom Filter --------------------------
 class BloomFilter {
     std::vector<uint64_t> bits; // BLOOM_SIZE bits
     static inline size_t h1(uint64_t k){ return k % BLOOM_SIZE; }
@@ -121,7 +128,7 @@ class OptimizedFastCDC {
 
     std::vector<MultiLevelChunk> findMultiLevelChunks(const char* filename) {
         std::ifstream file(filename, std::ios::binary);
-        if (!file) throw std::runtime_error("Cannot open file");
+        if (!file) throw std::runtime_error(std::string("Cannot open file: ") + filename);
         std::vector<MultiLevelChunk> chunks;
         if (ioBuf.size() < BUFFER_SIZE) ioBuf.resize(BUFFER_SIZE);
 
@@ -175,7 +182,7 @@ class OptimizedFastCDC {
         if (len == 0) return;
         uint8_t cmd = 1;
         write_val(patch, cmd);
-        uint32_t len32 = static_cast<uint32_t>(len); // command format uses u32 length
+        uint32_t len32 = static_cast<uint32_t>(len); 
         write_val(patch, len32);
         dst.clear(); dst.seekg(off);
         uint64_t remaining = len;
@@ -196,9 +203,38 @@ public:
         std::ofstream patch(patchFile, std::ios::binary);
         if (!src || !dst || !patch) throw std::runtime_error("Cannot open files");
 
-        // Expected output size header
-        dst.seekg(0, std::ios::end); uint64_t dstSize = dst.tellg(); dst.seekg(0);
-        uint8_t hdr = 0xFF; write_val(patch, hdr); write_val(patch, dstSize);
+        // 1. Calculate Destination Size (for Header)
+        dst.seekg(0, std::ios::end);
+        uint64_t dstSize = dst.tellg();
+        dst.seekg(0);
+
+        // 2. Source File Verification Hash (XXHash)
+        std::string srcHashStr;
+        try {
+            srcHashStr = fileHasher::xxhash_file(srcFile);
+        } catch (const std::exception& e) {
+            throw std::runtime_error(std::string("Failed to hash source file: ") + e.what());
+        }
+
+        // 3. Version String
+        std::string versionStr = std::string(VERSION);
+
+        // Write Patch Header
+        // [Magic 1B] [DstSize 8B] [VersionLen 1B] [VersionStr ...] [SrcHashLen 1B] [SrcHashStr ...]
+        uint8_t hdr = 0xFF; 
+        write_val(patch, hdr); 
+        
+        write_val(patch, dstSize);
+        
+        uint8_t verLen = static_cast<uint8_t>(versionStr.size());
+        if (verLen > 255) throw std::runtime_error("Version string too long");
+        write_val(patch, verLen);
+        patch.write(versionStr.c_str(), verLen);
+
+        uint8_t hashLen = static_cast<uint8_t>(srcHashStr.size());
+        if (hashLen > 64) throw std::runtime_error("Computed hash length is invalid");
+        write_val(patch, hashLen);
+        patch.write(srcHashStr.c_str(), hashLen);
 
         // Build index from source
         auto srcChunks = findMultiLevelChunks(srcFile);
@@ -209,6 +245,7 @@ public:
         std::vector<uint8_t> chunkData; chunkData.reserve(NORMAL_MAX);
 
         uint64_t cursor = 0; // emitted up to this dst offset
+
         for (const auto& c : dstChunks) {
             auto it = chunkIndex.find(c.hash);
             if (it == chunkIndex.end()) continue;
@@ -253,52 +290,115 @@ public:
         auto read_u64 = [&](uint64_t&v){ return read_exact(patch, &v, 8); };
 
         // Header
-        uint8_t hdr; uint64_t expected;
-        if (!read_u8(hdr) || hdr != 0xFF || !read_u64(expected)) throw std::runtime_error("bad patch header");
+        uint8_t hdr; 
+        uint64_t expected;
+        uint8_t versionLen;
+        
+        if (!read_u8(hdr) || hdr != 0xFF || !read_u64(expected) || !read_u8(versionLen)) {
+            throw std::runtime_error("bad patch header (magic/size/version)");
+        }
+
+        // Read Version
+        std::vector<char> verBuf(versionLen);
+        if (!read_exact(patch, verBuf.data(), versionLen)) {
+            throw std::runtime_error("bad patch header (version truncated)");
+        }
+        std::string patchVersion(verBuf.data(), versionLen);
+        Logger::Log(LOG_INFO, "Patch created using: " + patchVersion);
+        // Read Hash
+        uint8_t storedHashLen;
+        if (!read_u8(storedHashLen)) {
+            throw std::runtime_error("bad patch header (hash len)");
+        }
+        if (storedHashLen > 64) throw std::runtime_error("Invalid hash length in patch");
+        
+        std::vector<char> storedHashBuf(storedHashLen);
+        if (!read_exact(patch, storedHashBuf.data(), storedHashLen)) {
+            throw std::runtime_error("bad patch header (hash truncated)");
+        }
+        std::string storedHash(storedHashBuf.data(), storedHashLen);
+
+        // Source File Verification (XXHash)
+        std::string actualSrcHash;
+        try {
+            actualSrcHash = fileHasher::xxhash_file(srcFile);
+        } catch (const std::exception& e) {
+            throw std::runtime_error(std::string("Failed to hash current source file: ") + e.what());
+        }
+
+        if (storedHash != actualSrcHash) {
+            throw std::runtime_error("Source file hash mismatch! The patch was created for a different version of the source file.");
+        }
+
+        // Determine source size for validation
+        src.seekg(0, std::ios::end);
+        uint64_t srcSize = src.tellg();
+        src.seekg(0);
+
+        // Helper to check stream errors
+        auto checkOutStream = [&]() {
+            if (!out.good()) {
+                if (errno == ENOSPC) {
+                    throw std::runtime_error("No space left on device while writing output.");
+                }
+                throw std::runtime_error("Write failed while applying patch (Disk full or IO error).");
+            }
+        };
+
         uint64_t written = 0;
 
         while (true) {
             int p = patch.peek(); if (p == EOF) break;
             uint8_t cmd; if (!read_u8(cmd)) break;
+            
             if (cmd == 0) {
+                // COPY
                 uint64_t srcPos; uint32_t len;
                 if (!read_u64(srcPos) || !read_u32(len)) throw std::runtime_error("bad COPY record");
+                
+                // Input Validation: Check bounds
+                if (srcPos > srcSize) throw std::runtime_error("Patch error: Copy offset exceeds source file size");
+                if (static_cast<uint64_t>(srcPos) + len > srcSize) throw std::runtime_error("Patch error: Copy length exceeds source file size");
+
                 src.clear(); src.seekg(srcPos);
                 uint32_t remaining = len;
                 while (remaining){
                     uint32_t toRead = std::min<uint32_t>(remaining, static_cast<uint32_t>(ioBuf.size()));
                     src.read(reinterpret_cast<char*>(ioBuf.data()), toRead);
                     if (static_cast<size_t>(src.gcount()) != toRead) throw std::runtime_error("src short read in COPY");
+                    
                     out.write(reinterpret_cast<const char*>(ioBuf.data()), toRead);
+                    checkOutStream(); 
+
                     remaining -= toRead;
+                    written += toRead;
                 }
-                written += len;
             } else if (cmd == 1) {
+                // INSERT
                 uint32_t len; if (!read_u32(len)) throw std::runtime_error("bad INSERT record");
                 uint32_t remaining = len;
                 while (remaining){
                     uint32_t toRead = std::min<uint32_t>(remaining, static_cast<uint32_t>(ioBuf.size()));
                     if (!read_exact(patch, ioBuf.data(), toRead)) throw std::runtime_error("patch short read in INSERT");
+                    
                     out.write(reinterpret_cast<const char*>(ioBuf.data()), toRead);
+                    checkOutStream();
+
                     remaining -= toRead;
+                    written += toRead;
                 }
-                written += len;
             } else {
                 throw std::runtime_error("unknown command");
             }
         }
 
+        // Final flush and check
+        out.flush();
+        checkOutStream();
+
         if (written != expected) throw std::runtime_error("reconstructed size mismatch");
     }
 };
-
-// Include or forward-declare your internal class
-// class OptimizedFastCDC { public: void createPatch(const char*, const char*, const char*); void applyPatch(const char*, const char*, const char*); };
-
-namespace {
-    // If the full class is defined in another included .cpp, include it here or compile that .cpp too.
-    // Prefer: keep full class definition in a dedicated .cpp and compile it.
-}
 
 namespace fastcdc {
 
