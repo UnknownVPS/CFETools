@@ -40,7 +40,7 @@ jobs:
         run: unzip -q prebuilt-libs.zip
 
       - name: Build all distributions
-        run: make clean && make dist && mv cfx cfx-linux
+        run: make clean && make dist -j$(nproc) && mv cfx cfx-linux
       
       - name: Extract version from Version.h
         id: version
