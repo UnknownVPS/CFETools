@@ -110,68 +110,6 @@ namespace {
         return ss.str();
     }
 
-    // MIME type detection
-    std::string get_mime_type(const fs::path& path) {
-        static const std::unordered_map<std::string, std::string> ext_map = {
-            {".html", "text/html"},
-            {".htm", "text/html"},
-            {".css", "text/css"},
-            {".js", "application/javascript"},
-            {".json", "application/json"},
-            {".xml", "application/xml"},
-            {".png", "image/png"},
-            {".jpg", "image/jpeg"},
-            {".jpeg", "image/jpeg"},
-            {".gif", "image/gif"},
-            {".svg", "image/svg+xml"},
-            {".ico", "image/x-icon"},
-            {".webp", "image/webp"},
-            {".pdf", "application/pdf"},
-            {".mp4", "video/mp4"},
-            {".webm", "video/webm"},
-            {".ogg", "video/ogg"},
-            {".mp3", "audio/mpeg"},
-            {".wav", "audio/wav"},
-            {".zip", "application/zip"},
-            {".tar", "application/x-tar"},
-            {".gz", "application/gzip"},
-            {".7z", "application/x-7z-compressed"},
-            {".rar", "application/x-rar-compressed"},
-            {".txt", "text/plain"},
-            {".md", "text/markdown"},
-            {".csv", "text/csv"},
-            {".doc", "application/msword"},
-            {".docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"},
-            {".xls", "application/vnd.ms-excel"},
-            {".xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"},
-            {".ppt", "application/vnd.ms-powerpoint"},
-            {".pptx", "application/vnd.openxmlformats-officedocument.presentationml.presentation"},
-            {".wasm", "application/wasm"},
-        };
-        
-        std::string ext = path.extension().string();
-        std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
-        auto it = ext_map.find(ext);
-        return (it != ext_map.end()) ? it->second : "application/octet-stream";
-    }
-
-    // Generate ETag from file metadata
-    std::string generate_etag(const fs::path& path) {
-        std::error_code ec;
-        auto file_size = fs::file_size(path, ec);
-        if (ec) return "";
-        
-        auto last_write = fs::last_write_time(path, ec);
-        if (ec) return "";
-        
-        auto time_since_epoch = last_write.time_since_epoch().count();
-        
-        std::ostringstream ss;
-        // Cast time_since_epoch to unsigned long long to support platforms where it is __int128 (e.g. Android NDK)
-        ss << "\"" << std::hex << file_size << "-" << static_cast<unsigned long long>(time_since_epoch) << "\"";
-        return ss.str();
-    }
-
     // Generate breadcrumb navigation (Raw style)
     std::string generate_breadcrumbs(const std::string& url_path) {
         std::ostringstream html;
@@ -200,35 +138,6 @@ namespace {
         
         html << "</div>";
         return html.str();
-    }
-
-    // Parse query parameters 
-    std::unordered_map<std::string, std::string> parse_query(const std::string& query) {
-        std::unordered_map<std::string, std::string> params;
-        if (query.empty()) return params;
-        
-        size_t start = 0;
-        while (start < query.size()) {
-            size_t eq = query.find('=', start);
-            size_t amp = query.find('&', start);
-            
-            if (eq == std::string::npos) break;
-            
-            std::string key = query.substr(start, eq - start);
-            std::string value;
-            
-            if (amp == std::string::npos) {
-                value = query.substr(eq + 1);
-                start = query.size();
-            } else {
-                value = query.substr(eq + 1, amp - eq - 1);
-                start = amp + 1;
-            }
-            
-            params[url_decode(key)] = url_decode(value);
-        }
-        
-        return params;
     }
 
     // Custom error page (Raw style)
@@ -618,118 +527,88 @@ int start_server(const std::string& root_path, int port, size_t page_size, int t
             return;
         }
 
-        // Handle files
-        std::error_code size_ec;
-        uintmax_t file_size = fs::file_size(p, size_ec);
-        if (size_ec) {
-            res.status = 500;
-            res.set_content(generate_error_page(500, "Internal Server Error", "Could not determine file size"), "text/html");
-            return;
-        }
+        else {
+            std::error_code size_ec;
+            uintmax_t file_size = fs::file_size(p, size_ec);
+            if (size_ec) {
+                res.status = 500;
+                res.set_content("Could not determine file size", "text/plain");
+                return;
+            }
 
-        // Generate ETag
-        std::string etag = generate_etag(p);
-        
-        // Check If-None-Match header for caching
-        std::string if_none_match = req.get_header_value("If-None-Match");
-        if (!etag.empty() && !if_none_match.empty() && if_none_match == etag) {
-            res.status = 304;
-            res.set_header("ETag", etag.c_str());
-            return;
-        }
+            // 1. Parse Range Header
+            std::string range_header = req.get_header_value("Range");
+            uintmax_t start = 0;
+            uintmax_t end = file_size - 1;
+            bool is_range = false;
 
-        // Determine MIME type
-        std::string mime_type = get_mime_type(p);
-
-        // Parse Range header
-        std::string range_header = req.get_header_value("Range");
-        uintmax_t start = 0;
-        uintmax_t end = file_size - 1;
-        bool is_range = false;
-
-        if (!range_header.empty() && range_header.find("bytes=") == 0) {
-            std::string range_spec = range_header.substr(6);
-            size_t dash_pos = range_spec.find('-');
-            if (dash_pos != std::string::npos) {
-                try {
-                    std::string s_start = range_spec.substr(0, dash_pos);
-                    std::string s_end = range_spec.substr(dash_pos + 1);
-                    
-                    if (!s_start.empty()) start = std::stoull(s_start);
-                    if (!s_end.empty()) end = std::stoull(s_end);
-                    else end = file_size - 1;
-                    
-                    if (start < file_size && end < file_size && start <= end) {
-                        is_range = true;
+            if (!range_header.empty()) {
+                if (range_header.find("bytes=") == 0) {
+                    std::string range_spec = range_header.substr(6);
+                    size_t dash_pos = range_spec.find('-');
+                    if (dash_pos != std::string::npos) {
+                        try {
+                            std::string s_start = range_spec.substr(0, dash_pos);
+                            std::string s_end = range_spec.substr(dash_pos + 1);
+                            if (!s_start.empty()) start = std::stoull(s_start);
+                            if (!s_end.empty()) end = std::stoull(s_end);
+                            else end = file_size - 1;
+                            if (start < file_size && end < file_size && start <= end) {
+                                is_range = true;
+                            }
+                        } catch (...) { /* Ignore invalid range */ }
                     }
-                } catch (...) {
-                    // Invalid range, ignore
                 }
             }
-        }
 
-        uintmax_t content_length = is_range ? (end - start + 1) : file_size;
+            uintmax_t content_length = is_range ? (end - start + 1) : file_size;
 
-        // Open file
-        auto file_ptr = std::make_shared<std::ifstream>(p, std::ios::binary);
-        if (!file_ptr->is_open()) {
-            res.status = 500;
-            res.set_content(generate_error_page(500, "Internal Server Error", "Failed to open file"), "text/html");
-            return;
-        }
-
-        // Seek to start position once
-        file_ptr->seekg(start);
-        if (!file_ptr->good()) {
-            res.status = 500;
-            res.set_content(generate_error_page(500, "Internal Server Error", "Failed to seek in file"), "text/html");
-            return;
-        }
-
-        // Set response headers
-        if (is_range) {
-            res.status = 206;
-            std::ostringstream content_range;
-            content_range << "bytes " << start << "-" << end << "/" << file_size;
-            res.set_header("Content-Range", content_range.str().c_str());
-        } else {
-            res.status = 200;
-            res.set_header("Accept-Ranges", "bytes");
-        }
-
-        if (!etag.empty()) {
-            res.set_header("ETag", etag.c_str());
-        }
-
-        res.set_header("Cache-Control", "public, max-age=3600");
-
-        // Create shared buffer for streaming (reused across callbacks)
-        auto buffer = std::make_shared<std::vector<char>>(64 * 1024);
-        auto bytes_remaining = std::make_shared<uintmax_t>(content_length);
-
-        // Stream file content
-        res.set_content_provider(
-            content_length,
-            mime_type.c_str(),
-            [file_ptr, buffer, bytes_remaining](size_t offset, size_t length, httplib::DataSink &sink) {
-                // Don't seek on every call - file pointer advances naturally
-                uintmax_t remaining = *bytes_remaining;
-                if (remaining == 0) return false;
-
-                size_t to_read = std::min(static_cast<size_t>(remaining), buffer->size());
-                to_read = std::min(to_read, length);
-
-                file_ptr->read(buffer->data(), to_read);
-                std::streamsize read_count = file_ptr->gcount();
-
-                if (read_count > 0) {
-                    *bytes_remaining -= read_count;
-                    return sink.write(buffer->data(), read_count);
-                }
-
-                return false;
+            // 2. Open File
+            auto file_ptr = std::make_shared<std::ifstream>(p, std::ios::binary);
+            if (!file_ptr->is_open()) {
+                res.status = 500;
+                res.set_content("Failed to open file", "text/plain");
+                return;
             }
-        );
+
+            // 3. Set Headers
+            if (is_range) {
+                res.status = 206;
+                std::string content_range = "bytes " + std::to_string(start) + "-" + std::to_string(end) + "/" + std::to_string(file_size);
+                res.set_header("Content-Range", content_range.c_str());
+            } else {
+                res.status = 200;
+                res.set_header("Accept-Ranges", "bytes");
+            }
+
+            // 4. Stream
+            res.set_content_provider(
+                content_length,
+                "application/octet-stream",
+                [file_ptr, start](size_t offset, size_t length, httplib::DataSink &sink) {
+                    uintmax_t file_pos = start + offset;
+
+                    file_ptr->clear();
+                    file_ptr->seekg(file_pos);
+                    
+                    if (!file_ptr->good()) return false;
+
+                    const size_t chunk_size = 64 * 1024; 
+                    std::array<char, chunk_size> buffer; 
+
+                    size_t to_read = std::min(length, chunk_size);
+                    
+                    file_ptr->read(buffer.data(), to_read);
+                    size_t read_count = file_ptr->gcount();
+
+                    if (read_count > 0) {
+                        sink.write(buffer.data(), read_count);
+                    }
+                    
+                    return true;
+                }
+            );
+        }
     });
 
     // Handle OPTIONS for CORS preflight
