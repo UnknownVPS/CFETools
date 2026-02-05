@@ -15,7 +15,7 @@
 #include <csignal>
 #include <atomic>
 #include <thread>
-
+#include <format>
 namespace fs = std::filesystem;
 
 namespace {
@@ -173,6 +173,10 @@ namespace {
         size_t page_size = g_config.page_size;
         bool show_hidden = g_config.show_hidden;
         
+        // Parse Sort parameters
+        std::string sort_by = "name"; // default
+        std::string sort_order = "asc"; // default
+
         auto page_it = query_params.find("page");
         if (page_it != query_params.end()) {
             try {
@@ -184,6 +188,18 @@ namespace {
         if (hidden_it != query_params.end()) {
             show_hidden = (hidden_it->second == "1" || hidden_it->second == "true");
         }
+
+        auto sort_it = query_params.find("sort");
+        if (sort_it != query_params.end()) {
+            sort_by = sort_it->second;
+        }
+
+        auto order_it = query_params.find("order");
+        if (order_it != query_params.end()) {
+            sort_order = order_it->second;
+        }
+
+        const bool sort_desc = (sort_order == "desc");
 
         // Collect and filter entries
         std::vector<fs::directory_entry> entries;
@@ -202,14 +218,63 @@ namespace {
             entries.push_back(entry);
         }
 
-        // Sort: directories first, then alphabetically
-        std::sort(entries.begin(), entries.end(), [](const fs::directory_entry& a, const fs::directory_entry& b) {
+        // Sort: directories first, then by criteria
+        std::sort(entries.begin(), entries.end(), [&](const fs::directory_entry& a, const fs::directory_entry& b) {
             bool a_is_dir = a.is_directory();
             bool b_is_dir = b.is_directory();
-            if (a_is_dir == b_is_dir) {
-                return a.path().filename().string() < b.path().filename().string();
+            
+            // Always prioritize directories
+            if (a_is_dir != b_is_dir) {
+                return a_is_dir;
             }
-            return a_is_dir;
+
+            // Compare based on sort_by
+            if (sort_by == "name") {
+                std::string a_name = a.path().filename().string();
+                std::string b_name = b.path().filename().string();
+                return sort_desc ? (a_name > b_name) : (a_name < b_name);
+            } 
+                        else if (sort_by == "size") {
+                std::error_code ec1, ec2;
+                uintmax_t a_size = a_is_dir ? 0 : fs::file_size(a, ec1);
+                uintmax_t b_size = b_is_dir ? 0 : fs::file_size(b, ec2);
+                if (ec1) a_size = 0;
+                if (ec2) b_size = 0;
+                
+                // If sizes are equal, fallback to name for stability
+                if (a_size == b_size) {
+                     std::string a_name = a.path().filename().string();
+                     std::string b_name = b.path().filename().string();
+                     return a_name < b_name;
+                }
+                return sort_desc ? (a_size > b_size) : (a_size < b_size);
+            } 
+            else if (sort_by == "time") {
+                std::error_code ec1, ec2;
+                auto a_time = fs::last_write_time(a.path(), ec1);
+                auto b_time = fs::last_write_time(b.path(), ec2);
+                if (ec1) a_time = fs::file_time_type::min(); 
+                if (ec2) b_time = fs::file_time_type::min();
+                
+                // If times are equal, fallback to name
+                if (a_time == b_time) {
+                     std::string a_name = a.path().filename().string();
+                     std::string b_name = b.path().filename().string();
+                     return a_name < b_name;
+                }
+                return sort_desc ? (a_time > b_time) : (a_time < b_time);
+            }
+            else if (sort_by == "type") {
+                // Type is just DIR vs FILE. Since we separated them above,
+                // sorting by type within the groups essentially just sorts by name
+                // or is redundant. We default to name sorting here.
+                std::string a_name = a.path().filename().string();
+                std::string b_name = b.path().filename().string();
+                return sort_desc ? (a_name > b_name) : (a_name < b_name);
+            }
+            
+            // Fallback
+            return a.path().filename().string() < b.path().filename().string();
         });
 
         // Calculate pagination
@@ -217,6 +282,41 @@ namespace {
         size_t total_pages = (total_entries + page_size - 1) / page_size;
         size_t start_idx = (page - 1) * page_size;
         size_t end_idx = std::min(start_idx + page_size, total_entries);
+
+        // C++23: Helper to convert file_time to string using <format> and clock_cast
+        auto format_file_time = [](const fs::path& p) -> std::string {
+            std::error_code ec;
+            auto ftime = fs::last_write_time(p, ec);
+            if (ec) return "-";
+            
+            try {
+                // C++20/23: Use clock_cast to convert filesystem time to system time accurately
+                auto sys_time = std::chrono::clock_cast<std::chrono::system_clock>(ftime);
+                // C++20/23: Use std::format for safe, type-safe formatting
+                return std::format("{:%Y-%m-%d %H:%M}", sys_time);
+            } catch (...) {
+                return "-";
+            }
+        };
+
+        // Helper to generate sort links
+        auto get_sort_header = [&](const std::string& column, const std::string& label) -> std::string {
+            std::string next_order = "asc";
+            std::string arrow = "";
+            
+            if (sort_by == column) {
+                if (sort_desc) {
+                    next_order = "asc";
+                    arrow = " &#8595;"; // Down arrow
+                } else {
+                    next_order = "desc";
+                    arrow = " &#8593;"; // Up arrow
+                }
+            }
+            
+            std::string js_call = "setSort('" + column + "', '" + next_order + "')";
+            return "<a href=\"javascript:void(0)\" onclick=\"" + js_call + "\">" + label + arrow + "</a>";
+        };
 
         // Generate Raw HTML
         std::ostringstream html;
@@ -226,12 +326,22 @@ namespace {
              << "    <meta charset=\"UTF-8\">\n"
              << "    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n"
              << "    <title>Index of " << html_escape(url_path) << "</title>\n"
+             << "    <style>\n"
+             << "        body { font-family: monospace; margin: 20px; }\n"
+             << "        a { color: #0000EE; text-decoration: none; }\n"
+             << "        a:hover { text-decoration: underline; }\n"
+             << "        th a { color: #000; font-weight: bold; display: block; }\n"
+             << "        table { border-collapse: collapse; width: 100%; }\n"
+             << "        th, td { border: 1px solid #ccc; padding: 5px; }\n"
+             << "        th { background-color: #efefef; text-align: left; }\n"
+             << "        .btn { cursor: pointer; } \n"
+             << "    </style>\n"
              << "</head>\n"
-             << "<body style=\"font-family: monospace; margin: 20px;\">\n"
+             << "<body>\n"
              << "    <h1>Index of " << html_escape(url_path) << "</h1>\n"
              << generate_breadcrumbs(url_path)
              << "    <hr>\n"
-             << "    <form style=\"margin-bottom: 15px;\">\n";
+             << "    <div style=\"margin-bottom: 15px;\">\n";
         
         // Parent directory button
         if (url_path != "/") {
@@ -239,26 +349,27 @@ namespace {
             if (!parent_path.empty() && parent_path.back() == '/') parent_path.pop_back();
             size_t last_slash = parent_path.find_last_of('/');
             parent_path = (last_slash != std::string::npos) ? parent_path.substr(0, last_slash + 1) : "/";
-            html << "        <button type=\"button\" onclick=\"window.location.href='" << parent_path << "'\">[Parent Directory]</button>\n";
+            html << "        <button class=\"btn\" onclick=\"window.location.href='" << parent_path << "'\">[Parent Directory]</button>\n";
         }
         
-        html << "        <button type=\"button\" onclick=\"window.location.reload()\">[Refresh]</button>\n"
-             << "        <button type=\"button\" id=\"btnHidden\" onclick=\"toggleHidden()\">[Show Hidden]</button>\n"
-             << "    </form>\n"
+        html << "        <button class=\"btn\" onclick=\"window.location.reload()\">[Refresh]</button>\n"
+             << "        <button class=\"btn\" id=\"btnHidden\" onclick=\"toggleHidden()\">[Show Hidden]</button>\n"
+             << "    </div>\n"
              << "    <hr>\n"
-             << "    <table border=\"1\" cellpadding=\"5\" cellspacing=\"0\" width=\"100%\">\n"
+             << "    <table>\n"
              << "        <thead>\n"
-             << "            <tr style=\"background-color: #efefef;\">\n"
-             << "                <th style=\"text-align: left;\">Name</th>\n"
-             << "                <th style=\"width: 100px;\">Type</th>\n"
-             << "                <th style=\"width: 120px;\">Size</th>\n"
-             << "                <th style=\"width: 120px;\">Action</th>\n"
+             << "            <tr>\n"
+             << "                <th style=\"width: 40%;\">" << get_sort_header("name", "Name") << "</th>\n"
+             << "                <th style=\"width: 80px;\">Type</th>\n"
+             << "                <th style=\"width: 120px;\">" << get_sort_header("size", "Size") << "</th>\n"
+             << "                <th style=\"width: 160px;\">" << get_sort_header("time", "Modified") << "</th>\n"
+             << "                <th style=\"width: 100px;\">Action</th>\n"
              << "            </tr>\n"
              << "        </thead>\n"
              << "        <tbody>\n";
 
         if (entries.empty()) {
-            html << "            <tr><td colspan=\"4\" style=\"text-align:center;\">Empty Directory</td></tr>\n";
+            html << "            <tr><td colspan=\"5\" style=\"text-align:center;\">Empty Directory</td></tr>\n";
         } else {
             for (size_t i = start_idx; i < end_idx; ++i) {
                 auto& entry = entries[i];
@@ -270,6 +381,8 @@ namespace {
                 if (is_dir) link += "/";
 
                 std::string size_str = "-";
+                std::string time_str = format_file_time(entry.path());
+                
                 if (!is_dir) {
                     std::error_code ec;
                     auto size = fs::file_size(entry.path(), ec);
@@ -288,8 +401,9 @@ namespace {
                 html << "</td>";
                 html << "<td>" << (is_dir ? "DIR" : "FILE") << "</td>";
                 html << "<td>" << size_str << "</td>";
+                html << "<td>" << time_str << "</td>";
                 if (is_dir) {
-                    html << "<td><button onclick=\"window.location.href='" << link << "'\">[Open]</button></td>";
+                    html << "<td><button class=\"btn\" onclick=\"window.location.href='" << link << "'\">[Open]</button></td>";
                 } else {
                     html << "<td><a href=\"" << link << "\" download>[Download]</a></td>";
                 }
@@ -343,12 +457,18 @@ namespace {
              << "            url.searchParams.delete('page');\n"
              << "            window.location.href = url.toString();\n"
              << "        }\n"
+             << "        function setSort(column, order) {\n"
+             << "            const url = new URL(window.location);\n"
+             << "            url.searchParams.set('sort', column);\n"
+             << "            url.searchParams.set('order', order);\n"
+             << "            url.searchParams.delete('page');\n"
+             << "            window.location.href = url.toString();\n"
+             << "        }\n"
              << "        function goToPage(page) {\n"
              << "            const url = new URL(window.location);\n"
              << "            url.searchParams.set('page', page);\n"
              << "            window.location.href = url.toString();\n"
              << "        }\n"
-             << "        // Initialize UI state on load\n"
              << "        updateHiddenButton();\n"
              << "    </script>\n"
              << "</body>\n"
