@@ -283,17 +283,31 @@ namespace {
         size_t start_idx = (page - 1) * page_size;
         size_t end_idx = std::min(start_idx + page_size, total_entries);
 
-        // C++23: Helper to convert file_time to string using <format> and clock_cast
+        // Helper to convert file_time to string using <format> and clock_cast
         auto format_file_time = [](const fs::path& p) -> std::string {
             std::error_code ec;
             auto ftime = fs::last_write_time(p, ec);
             if (ec) return "-";
             
             try {
-                // C++20/23: Use clock_cast to convert filesystem time to system time accurately
-                auto sys_time = std::chrono::clock_cast<std::chrono::system_clock>(ftime);
-                // C++20/23: Use std::format for safe, type-safe formatting
-                return std::format("{:%Y-%m-%d %H:%M}", sys_time);
+                // Manual conversion instead of clock_cast for Android compatibility
+                // filesystem::file_time_type uses a different epoch, convert manually
+                auto sctp = std::chrono::time_point_cast<std::chrono::system_clock::duration>(
+                    ftime - fs::file_time_type::clock::now() + std::chrono::system_clock::now()
+                );
+                
+                // Convert to time_t for formatting (C++20 std::format not available on Android NDK)
+                auto sys_time_t = std::chrono::system_clock::to_time_t(sctp);
+                std::tm tm;
+                #ifdef _WIN32
+                    localtime_s(&tm, &sys_time_t);
+                #else
+                    localtime_r(&sys_time_t, &tm);
+                #endif
+                
+                std::ostringstream oss;
+                oss << std::put_time(&tm, "%Y-%m-%d %H:%M");
+                return oss.str();
             } catch (...) {
                 return "-";
             }
