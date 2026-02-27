@@ -20,6 +20,7 @@
 
 CFETools (Comprehensive File Encoding Tools) is a powerful, cross-platform toolkit designed for file compression, encryption, and advanced data manipulation. Built with modern C++23, it prioritizes speed, security, and efficiency for handling files of any size.
 
+CFETools is just a solo project by me, the development was advanced in some parts using AI. I know its not a standard project but since I find it useful, you might as well.
 ### Key Highlights
 
 - **🚀 High Performance**: Multi-threaded operations with hardware-accelerated algorithms
@@ -555,28 +556,19 @@ Contributions are welcome! Please follow these guidelines:
 
 This project is licensed under the **GNU General Public License v3.0** - see the [LICENSE](LICENSE) file for details.
 
-### Key Points
-
-- ✅ Free to use, modify, and distribute
-- ✅ Source code must remain open
-- ✅ Changes must be documented
-- ❌ No warranty provided
-
 ---
 
 ## 👥 Authors
 
-- **[@unknownpersonog](https://github.com/unknownpersonog)** - Lead Developer
-- Part of [UnknownVPS](https://github.com/UnknownVPS) Team
+- **[@unknownpersonog](https://github.com/unknownpersonog)** - Developer
 
 ---
 
 ## 📞 Support
 
 - **Email**: admin@unknownvps.eu.org
-- **Discord**: [Join our server](https://discord.gg/unknownvps)
-- **Issues**: [GitHub Issues](https://github.com/unknownpersonog/Nutox/issues)
-- **Documentation**: [Wiki](https://github.com/unknownpersonog/Nutox/wiki)
+- **Issues**: [GitHub Issues](https://github.com/UnknownVPS/CFETools/issues)
+- **Documentation**: [Wiki](https://github.com/UnknownVPS/CFETools/wiki)
 
 ---
 
@@ -616,7 +608,7 @@ This project is licensed under the **GNU General Public License v3.0** - see the
 - Streamlined command system with auto-registration
 
 ### Previous Versions
-See [CHANGELOG.md](CHANGELOG.md) for complete history.
+See commits for complete history.
 
 ---
 
