@@ -31,6 +31,8 @@ CFETools is just a solo project by me, the development was advanced in some part
 - **🔐 Secret Sharing**: Shamir's Secret Sharing with IDA encoding
 - **🌐 Cross-Platform**: Native builds for Linux, Windows, and Android
 
+![CFETools Help](https://files.unknownvps.eu.org/get/file/CFETHelp.png)
+
 ---
 
 ## ✨ Features
