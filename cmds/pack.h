@@ -9,7 +9,7 @@
 #include <queue>
 #include <vector>
 #include <atomic>
-
+#include <cstring>
 extern std::string save_path;
 
 class PackCommand : public Command {
