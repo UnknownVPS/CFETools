@@ -1,4 +1,3 @@
-
 #include <iostream>
 #include <fstream>
 #include <vector>
@@ -6,336 +5,257 @@
 #include <chrono>
 #include <iomanip>
 #include <cstring>
+#include <cstdio>
 
-// Conditional includes based on available libraries
 #ifdef USE_ZSTD
 #include <zstd.h>
 #endif
-
 #ifdef USE_LZ4
 #include <lz4frame.h>
 #endif
-
 #ifdef USE_LIBLZMA
 #include <lzma.h>
 #endif
 
-enum class CompressionFormat {
-    UNKNOWN,
-    LZ4F,
-    ZSTD,
-    LZMA2_XZ
-};
+#include "decompress.h"
 
-/**
- * Detect compression format from file header magic bytes
- */
-CompressionFormat detectCompressionFormat(const std::string& filename) {
-    std::ifstream file(filename, std::ios::binary);
-    if (!file.is_open()) {
-        return CompressionFormat::UNKNOWN;
-    }
+// ─────────────────────────────────────────────────────────────────
+//  Format detection — works from raw bytes, no seeking needed.
+// ─────────────────────────────────────────────────────────────────
 
-    // Read first 8 bytes to check magic numbers
-    uint8_t header[8] = {0};
-    file.read(reinterpret_cast<char*>(header), 8);
-    file.close();
-
-    // LZ4F magic: 0x184D2204 (little endian)
-    if (header[0] == 0x04 && header[1] == 0x22 && header[2] == 0x4D && header[3] == 0x18) {
+CompressionFormat detectFormatFromHeader(const uint8_t h[8]) {
+    // LZ4F magic: 0x184D2204 (LE)
+    if (h[0]==0x04 && h[1]==0x22 && h[2]==0x4D && h[3]==0x18)
         return CompressionFormat::LZ4F;
-    }
-
-    // ZSTD magic: 0x28B52FFD (little endian) - note: this is the correct order
-    if (header[0] == 0x28 && header[1] == 0xB5 && header[2] == 0x2F && header[3] == 0xFD) {
+    // ZSTD magic: 0x28B52FFD (LE)
+    if (h[0]==0x28 && h[1]==0xB5 && h[2]==0x2F && h[3]==0xFD)
         return CompressionFormat::ZSTD;
-    }
-
-    // XZ magic: 0xFD 0x37 0x7A 0x58 0x5A 0x00
-    if (header[0] == 0xFD && header[1] == 0x37 && header[2] == 0x7A && 
-        header[3] == 0x58 && header[4] == 0x5A && header[5] == 0x00) {
+    // XZ magic: FD 37 7A 58 5A 00
+    if (h[0]==0xFD && h[1]==0x37 && h[2]==0x7A &&
+        h[3]==0x58 && h[4]==0x5A && h[5]==0x00)
         return CompressionFormat::LZMA2_XZ;
-    }
-
     return CompressionFormat::UNKNOWN;
 }
 
-/**
- * Get format name as string
- */
-std::string getFormatName(CompressionFormat format) {
-    switch (format) {
-        case CompressionFormat::LZ4F: return "LZ4 Frame";
-        case CompressionFormat::ZSTD: return "ZSTD";
-        case CompressionFormat::LZMA2_XZ: return "LZMA2/XZ";
-        default: return "Unknown";
+static CompressionFormat detectFromFile(const std::string& filename) {
+    std::ifstream f(filename, std::ios::binary);
+    if (!f) return CompressionFormat::UNKNOWN;
+    uint8_t h[8] = {};
+    f.read(reinterpret_cast<char*>(h), 8);
+    return detectFormatFromHeader(h);
+}
+
+static std::string formatName(CompressionFormat fmt) {
+    switch (fmt) {
+        case CompressionFormat::LZ4F:    return "LZ4 Frame";
+        case CompressionFormat::ZSTD:    return "ZSTD";
+        case CompressionFormat::LZMA2_XZ:return "LZMA2/XZ";
+        default:                          return "Unknown";
     }
 }
 
-/**
- * Memory-efficient streaming file decompression function with auto-detection
- * Handles files of any size by processing in chunks
- * 
- * @param input_file Path to compressed input file
- * @param output_file Path for decompressed output file
- * @return bool true if decompression successful, false otherwise
- */
-bool decompressFile(const std::string& input_file, const std::string& output_file) {
-    // Auto-detect compression format
-    CompressionFormat format = detectCompressionFormat(input_file);
-    if (format == CompressionFormat::UNKNOWN) {
-        std::cerr << "Error: Unknown or unsupported compression format" << std::endl;
+// ─────────────────────────────────────────────────────────────────
+//  Core streaming decompressor.
+//  peek_header: the first 8 bytes already consumed from the stream.
+//  src:         callback for the remaining bytes (after those 8).
+// ─────────────────────────────────────────────────────────────────
+
+bool decompressStream(const uint8_t peek_header[8], ReadFn src, WriteFn dst) {
+    CompressionFormat fmt = detectFormatFromHeader(peek_header);
+    if (fmt == CompressionFormat::UNKNOWN) {
+        Logger::Log(LOG_ERROR, "decompressStream: unknown format magic");
         return false;
     }
+    Logger::Log(LOG_INFO, "Detected format: " + formatName(fmt));
 
-    std::cout << "Detected format: " << getFormatName(format) << std::endl;
+    // We have already consumed 8 bytes; prepend them to the stream via a
+    // small stateful wrapper so the decoders see a complete, contiguous stream.
+    uint8_t leftover[8];
+    memcpy(leftover, peek_header, 8);
+    size_t leftover_pos = 0;
 
-    std::ifstream infile(input_file, std::ios::binary);
-    if (!infile.is_open()) {
-        std::cerr << "Error: Cannot open input file: " << input_file << std::endl;
-        return false;
-    }
-
-    // Get compressed file size
-    infile.seekg(0, std::ios::end);
-    size_t compressed_size = infile.tellg();
-    infile.seekg(0, std::ios::beg);
-
-    std::ofstream outfile(output_file, std::ios::binary);
-    if (!outfile.is_open()) {
-        std::cerr << "Error: Cannot create output file: " << output_file << std::endl;
-        return false;
-    }
+    // Wraps `src` so it first replays the 8 peeked bytes then calls the real src.
+    auto full_src = [&](void* buf, size_t len) -> size_t {
+        size_t out = 0;
+        uint8_t* b = static_cast<uint8_t*>(buf);
+        // Drain leftover first
+        if (leftover_pos < 8) {
+            size_t avail = 8 - leftover_pos;
+            size_t take  = std::min(avail, len);
+            memcpy(b, leftover + leftover_pos, take);
+            leftover_pos += take;
+            out += take;
+            b   += take;
+            len -= take;
+        }
+        if (len > 0) out += src(b, len);
+        return out;
+    };
 
     auto start = std::chrono::high_resolution_clock::now();
     bool success = false;
-    size_t total_decompressed = 0;
-
-    // Chunk size for streaming
-    const size_t CHUNK_SIZE = 4 * 1024 * 1024;
+    size_t total_out = 0;
+    const size_t CHUNK = 4 * 1024 * 1024;
 
     try {
-        if (format == CompressionFormat::LZ4F) {
-        #ifdef USE_LZ4
+        // ── LZ4F ───────────────────────────────────────────────────
+        if (fmt == CompressionFormat::LZ4F) {
+#ifdef USE_LZ4
             LZ4F_decompressionContext_t dctx;
-            LZ4F_errorCode_t createResult = LZ4F_createDecompressionContext(&dctx, LZ4F_VERSION);
-            if (LZ4F_isError(createResult)) {
-                std::cerr << "LZ4F context creation failed: " << LZ4F_getErrorName(createResult) << std::endl;
-                return false;
-            }
+            if (LZ4F_isError(LZ4F_createDecompressionContext(&dctx, LZ4F_VERSION)))
+                throw std::runtime_error("LZ4F context creation failed");
 
-            const size_t IN_BUF_SIZE = 256 * 1024;
-            const size_t OUT_BUF_SIZE = 4 * 1024 * 1024;
-            
-            std::vector<char> inBuf(IN_BUF_SIZE);
-            std::vector<char> outBuf(OUT_BUF_SIZE);
+            const size_t IN_SZ  = 256 * 1024;
+            const size_t OUT_SZ = 4   * 1024 * 1024;
+            std::vector<char> inBuf(IN_SZ), outBuf(OUT_SZ);
+            bool done = false;
 
-            size_t inPos = 0;
-            size_t inSize = 0;
-            bool endOfFile = false;
+            while (!done) {
+                size_t bytesRead = full_src(inBuf.data(), IN_SZ);
+                if (bytesRead == 0) break;
 
-            while (!endOfFile) {
-                // Read more data if input buffer is depleted
-                if (inPos >= inSize) {
-                    if (!infile.eof()) {
-                        infile.read(inBuf.data(), IN_BUF_SIZE);
-                        inSize = infile.gcount();
-                        inPos = 0;
-                        
-                        if (inSize == 0) break;
-                    } else {
-                        break;
+                size_t srcConsumed = bytesRead;
+                const char* srcPtr = inBuf.data();
+
+                while (srcConsumed > 0) {
+                    size_t dstCap  = OUT_SZ;
+                    size_t srcUsed = srcConsumed;
+                    size_t ret = LZ4F_decompress(dctx, outBuf.data(), &dstCap,
+                                                 srcPtr, &srcUsed, nullptr);
+                    if (LZ4F_isError(ret)) throw std::runtime_error("LZ4F decompress error");
+                    if (dstCap > 0) {
+                        if (!dst(outBuf.data(), dstCap)) throw std::runtime_error("Write error (LZ4)");
+                        total_out += dstCap;
                     }
-                }
-
-                // Prepare input and output
-                size_t srcSize = inSize - inPos;
-                const char* srcPtr = inBuf.data() + inPos;
-                char* dstPtr = outBuf.data();
-                size_t dstCapacity = OUT_BUF_SIZE;
-
-                // Decompress
-                size_t decompResult = LZ4F_decompress(
-                    dctx,
-                    dstPtr, &dstCapacity,
-                    srcPtr, &srcSize,
-                    NULL
-                );
-
-                if (LZ4F_isError(decompResult)) {
-                    std::cerr << "LZ4F decompression error: " << LZ4F_getErrorName(decompResult) << std::endl;
-                    LZ4F_freeDecompressionContext(dctx);
-                    return false;
-                }
-
-                // Write decompressed data
-                if (dstCapacity > 0) {
-                    outfile.write(dstPtr, dstCapacity);
-                    total_decompressed += dstCapacity;
-                }
-
-                // Update input position
-                inPos += srcSize;
-
-                // Check if frame is complete
-                if (decompResult == 0) {
-                    endOfFile = true;
-                    break;
-                }
-
-                // Prevent infinite loop
-                if (srcSize == 0 && dstCapacity == 0) {
-                    if (infile.eof()) break;
+                    srcPtr       += srcUsed;
+                    srcConsumed  -= srcUsed;
+                    if (ret == 0) { done = true; break; }
                 }
             }
-
             LZ4F_freeDecompressionContext(dctx);
-            success = (total_decompressed > 0);
-        #else
-            std::cerr << "Error: LZ4 not available for decompression" << std::endl;
-            success = false;
-        #endif
-        }
-                else if (format == CompressionFormat::ZSTD) {
-                    // ZSTD decompression
-        #ifdef USE_ZSTD
-                    ZSTD_DCtx* dctx = ZSTD_createDCtx();
-                    if (!dctx) {
-                        std::cerr << "ZSTD decompression context creation failed" << std::endl;
-                        return false;
-                    }
-
-                    std::vector<char> inBuf(CHUNK_SIZE);
-                    std::vector<char> outBuf(CHUNK_SIZE * 4);
-
-                    while (infile && !infile.eof()) {
-                        infile.read(inBuf.data(), CHUNK_SIZE);
-                        std::streamsize bytesRead = infile.gcount();
-                        if (bytesRead <= 0) break;
-
-                        ZSTD_inBuffer input = { inBuf.data(), static_cast<size_t>(bytesRead), 0 };
-
-                        while (input.pos < input.size) {
-                            ZSTD_outBuffer output = { outBuf.data(), outBuf.size(), 0 };
-
-                            size_t result = ZSTD_decompressStream(dctx, &output, &input);
-                            if (ZSTD_isError(result)) {
-                                std::cerr << "ZSTD decompression error: " << ZSTD_getErrorName(result) << std::endl;
-                                ZSTD_freeDCtx(dctx);
-                                return false;
-                            }
-
-                            if (output.pos > 0) {
-                                outfile.write(static_cast<char*>(output.dst), output.pos);
-                                total_decompressed += output.pos;
-                            }
-                        }
-                    }
-
-                    ZSTD_freeDCtx(dctx);
-                    success = true;
-        #else
-                    std::cerr << "Error: ZSTD not available for decompression" << std::endl;
-        #endif
-        }
-        else if (format == CompressionFormat::LZMA2_XZ) {
-            // LZMA2/XZ decompression
-#ifdef USE_LIBLZMA
-            lzma_stream strm = LZMA_STREAM_INIT;
-
-            // Initialize decoder for .xz format
-            lzma_ret ret = lzma_stream_decoder(&strm, UINT64_MAX, LZMA_CONCATENATED);
-            if (ret != LZMA_OK) {
-                std::cerr << "LZMA decoder initialization failed: " << ret << std::endl;
-                return false;
-            }
-
-            std::vector<uint8_t> inBuf(CHUNK_SIZE);
-            std::vector<uint8_t> outBuf(CHUNK_SIZE * 4);
-
-            lzma_action action = LZMA_RUN;
-
-            while (true) {
-                if (strm.avail_in == 0 && !infile.eof()) {
-                    infile.read(reinterpret_cast<char*>(inBuf.data()), CHUNK_SIZE);
-                    std::streamsize bytesRead = infile.gcount();
-
-                    strm.next_in = inBuf.data();
-                    strm.avail_in = bytesRead;
-
-                    if (infile.eof()) {
-                        action = LZMA_FINISH;
-                    }
-                }
-
-                strm.next_out = outBuf.data();
-                strm.avail_out = outBuf.size();
-
-                ret = lzma_code(&strm, action);
-
-                size_t write_size = outBuf.size() - strm.avail_out;
-                if (write_size > 0) {
-                    outfile.write(reinterpret_cast<char*>(outBuf.data()), write_size);
-                    total_decompressed += write_size;
-                }
-
-                if (ret == LZMA_STREAM_END) {
-                    success = true;
-                    break;
-                } else if (ret != LZMA_OK) {
-                    std::cerr << "LZMA decompression error: " << ret << std::endl;
-                    break;
-                }
-            }
-
-            lzma_end(&strm);
+            success = true;
 #else
-            std::cerr << "Error: liblzma not available for decompression" << std::endl;
+            throw std::runtime_error("LZ4 not compiled in");
 #endif
         }
+        // ── ZSTD ───────────────────────────────────────────────────
+        else if (fmt == CompressionFormat::ZSTD) {
+#ifdef USE_ZSTD
+            ZSTD_DCtx* dctx = ZSTD_createDCtx();
+            if (!dctx) throw std::runtime_error("ZSTD context creation failed");
 
+            std::vector<char> inBuf(CHUNK), outBuf(CHUNK * 4);
+            while (true) {
+                size_t bytesRead = full_src(inBuf.data(), CHUNK);
+                if (bytesRead == 0) break;
+
+                ZSTD_inBuffer input = { inBuf.data(), bytesRead, 0 };
+                while (input.pos < input.size) {
+                    ZSTD_outBuffer output = { outBuf.data(), outBuf.size(), 0 };
+                    size_t ret = ZSTD_decompressStream(dctx, &output, &input);
+                    if (ZSTD_isError(ret)) throw std::runtime_error("ZSTD decompress error");
+                    if (output.pos > 0) {
+                        if (!dst(outBuf.data(), output.pos)) throw std::runtime_error("Write error (ZSTD)");
+                        total_out += output.pos;
+                    }
+                }
+            }
+            ZSTD_freeDCtx(dctx);
+            success = true;
+#else
+            throw std::runtime_error("ZSTD not compiled in");
+#endif
+        }
+        // ── LZMA2/XZ ───────────────────────────────────────────────
+        else {
+#ifdef USE_LIBLZMA
+            lzma_stream strm = LZMA_STREAM_INIT;
+            if (lzma_stream_decoder(&strm, UINT64_MAX, LZMA_CONCATENATED) != LZMA_OK)
+                throw std::runtime_error("LZMA decoder init failed");
+
+            std::vector<uint8_t> inBuf(CHUNK), outBuf(CHUNK * 4);
+            lzma_action action = LZMA_RUN;
+            bool eof = false;
+
+            while (true) {
+                if (strm.avail_in == 0 && !eof) {
+                    size_t r = full_src(inBuf.data(), CHUNK);
+                    strm.next_in  = inBuf.data();
+                    strm.avail_in = r;
+                    if (r < CHUNK) { action = LZMA_FINISH; eof = true; }
+                }
+                strm.next_out  = outBuf.data();
+                strm.avail_out = outBuf.size();
+                lzma_ret ret   = lzma_code(&strm, action);
+                size_t ws = outBuf.size() - strm.avail_out;
+                if (ws > 0) {
+                    if (!dst(outBuf.data(), ws)) throw std::runtime_error("Write error (LZMA)");
+                    total_out += ws;
+                }
+                if (ret == LZMA_STREAM_END) { success = true; break; }
+                if (ret != LZMA_OK) throw std::runtime_error("LZMA decode error");
+            }
+            lzma_end(&strm);
+#else
+            throw std::runtime_error("liblzma not compiled in");
+#endif
+        }
     } catch (const std::exception& e) {
-        std::cerr << "Exception during decompression: " << e.what() << std::endl;
-        success = false;
-    }
-
-    infile.close();
-    outfile.close();
-
-    auto end = std::chrono::high_resolution_clock::now();
-    double time_ms = std::chrono::duration<double, std::milli>(end - start).count();
-
-    if (success) {
-        double speed_mbps = (total_decompressed / (1024.0 * 1024.0)) / (time_ms / 1000.0);
-
-        std::cout << "Decompression successful!" << std::endl;
-        std::cout << "  Format: " << getFormatName(format) << std::endl;
-        std::cout << "  Size: " << compressed_size << " : " << total_decompressed << " bytes" << std::endl;
-        std::cout << "  Ratio: " << std::fixed << std::setprecision(2) 
-                  << (static_cast<double>(total_decompressed) / compressed_size) << ":1" << std::endl;
-        std::cout << "  Expansion: " << std::fixed << std::setprecision(1)
-                  << (100.0 * (static_cast<double>(total_decompressed) / compressed_size - 1.0)) << "%" << std::endl;
-        std::cout << "  Speed: " << std::fixed << std::setprecision(1) << speed_mbps << " MB/s" << std::endl;
-        std::cout << "  Time: " << std::fixed << std::setprecision(2) << time_ms << " ms" << std::endl;
-
-        return true;
-    } else {
-        std::cerr << "Error: Decompression failed" << std::endl;
+        Logger::Log(LOG_ERROR, std::string("Decompression exception: ") + e.what());
         return false;
     }
+
+    auto end = std::chrono::high_resolution_clock::now();
+    double ms = std::chrono::duration<double, std::milli>(end - start).count();
+    if (success)
+        Logger::Log(LOG_INFO, "Decompression done in " +
+                    std::to_string(static_cast<int>(ms)) + " ms, " +
+                    std::to_string(total_out) + " bytes out");
+    return success;
 }
 
-/**
- * Check if file is compressed by attempting format detection
- */
+// ─────────────────────────────────────────────────────────────────
+//  File-based wrapper (original public API, unchanged).
+// ─────────────────────────────────────────────────────────────────
+
+bool decompressFile(const std::string& input_file, const std::string& output_file) {
+    // Peek at header bytes then open a streaming read.
+    std::ifstream probe(input_file, std::ios::binary);
+    if (!probe) {
+        Logger::Log(LOG_ERROR, "Cannot open: " + input_file);
+        return false;
+    }
+    uint8_t hdr[8] = {};
+    probe.read(reinterpret_cast<char*>(hdr), 8);
+    probe.close();
+
+    FILE* infile  = fopen(input_file.c_str(),  "rb");
+    FILE* outfile = fopen(output_file.c_str(), "wb");
+    if (!infile || !outfile) {
+        if (infile)  fclose(infile);
+        if (outfile) fclose(outfile);
+        Logger::Log(LOG_ERROR, "Cannot open files for decompression");
+        return false;
+    }
+
+    // For file-based path, src already has full data — pass a zero-byte peek.
+    // We re-read from the beginning so nothing is skipped.
+    uint8_t zero_peek[8] = {};  // no bytes pre-consumed
+    ReadFn src = [infile](void* b, size_t n) -> size_t { return fread(b, 1, n, infile); };
+    WriteFn dst = [outfile](const void* b, size_t n) -> bool { return fwrite(b, 1, n, outfile) == n; };
+
+    // Use the header we peeked but let the ReadFn replay from offset 0 (FILE* is still at 0).
+    bool ok = decompressStream(hdr, src, dst);
+    fclose(infile);
+    fclose(outfile);
+    if (!ok) std::remove(output_file.c_str());
+    return ok;
+}
+
 bool isCompressedFile(const std::string& filename) {
-    return detectCompressionFormat(filename) != CompressionFormat::UNKNOWN;
+    return detectFromFile(filename) != CompressionFormat::UNKNOWN;
 }
 
-/**
- * Get compression format of a file as string
- */
 std::string getFileCompressionFormat(const std::string& filename) {
-    return getFormatName(detectCompressionFormat(filename));
+    return formatName(detectFromFile(filename));
 }
-
