@@ -54,10 +54,10 @@ struct MultiLevelChunk {
 };
 
 struct SigEntry {
-    XXH128_hash_t hash; // 128-bit on disk
-    uint64_t pos;
-    uint32_t len;
-} __attribute__((packed)); // Ensure cross-platform binary compatibility
+    XXH128_hash_t hash; // 128-bit on disk (16 bytes)
+    uint16_t len;       // Max chunk size is 8192, comfortably fits in 16-bit (2 bytes)
+    // Note: 'pos' (8 bytes) was removed. It is mathematically reconstructed during read time.
+} __attribute__((packed)); // Total 18 bytes instead of 28 bytes!
 
 // -------------------------- Hash Utilities --------------------------
 struct XXH128Hasher {
@@ -276,7 +276,8 @@ public:
         
         // 3. Generate and stream chunks directly to disk
         processMultiLevelChunks(srcFile, [&](const MultiLevelChunk& c, const uint8_t*) {
-            SigEntry entry = {c.hash, c.pos, c.len}; 
+            // Drop 'pos' and cast 'len' down to 16 bits to drastically shrink signature size
+            SigEntry entry = {c.hash, static_cast<uint16_t>(c.len)}; 
             write_val(sig, entry);
         });
     }
@@ -297,11 +298,15 @@ public:
         
         std::string srcHashStr(hdr.srcHash, hdr.hashLen);
         
+        uint64_t currentPos = 0; // We accumulate position implicitly!
         while (true) {
             SigEntry e; 
             if (!read_exact(sig, &e, sizeof(SigEntry))) break;
-            chunkIndex[e.hash] = e.pos;
+            
+            chunkIndex[e.hash] = currentPos;
             bloomFilter.insert(e.hash);
+            
+            currentPos += e.len; // Sequences are strictly contiguous, this gives perfect positioning
         }
 
         // 2. Setup Patch Header 
