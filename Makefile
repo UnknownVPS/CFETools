@@ -78,6 +78,7 @@ SRCS = utils/userinput/user_input.cpp \
        func/img_creation/create_img.cpp \
        func/file_creation/create_file.cpp \
 	   func/patch_creation/patch.cpp \
+	   func/patch_creation/patch64.cpp \
        utils/logger/logger.cpp \
        func/folder_packer/folder_packer.cpp \
        utils/compress/compress.cpp \
