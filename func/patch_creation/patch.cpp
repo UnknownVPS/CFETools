@@ -1,7 +1,6 @@
 #include <iostream>
 #include <fstream>
 #include <vector>
-#include <unordered_map>
 #include <unordered_set>
 #include <cstdint>
 #include <cstring>
@@ -11,6 +10,8 @@
 #include <sstream>
 #include <iomanip>
 #include <cerrno>
+#include <functional>
+#include "unordered_dense.h"
 #include "../../utils/logger/logger.h"
 #include "../../version.h"
 #include "../../utils/hashers/fileHasher.hpp"
@@ -48,8 +49,7 @@ struct SignatureHeader {
 struct MultiLevelChunk { 
     uint64_t pos; 
     uint32_t len; 
-    uint64_t hash64;    // For standard createPatch (local memcmp)
-    XXH128_hash_t hash128; // For signatures (collision-proof)
+    XXH128_hash_t hash; // Unified 128-bit hash for patching and signatures
     uint8_t level; 
 };
 
@@ -58,6 +58,25 @@ struct SigEntry {
     uint64_t pos;
     uint32_t len;
 } __attribute__((packed)); // Ensure cross-platform binary compatibility
+
+// -------------------------- Hash Utilities --------------------------
+struct XXH128Hasher {
+    // ankerl::unordered_dense specific optimization: 
+    // XXH3 already produces highly avalanched bits. By specifying this, 
+    // we tell unordered_dense NOT to waste time re-mixing the bits.
+    using is_avalanching = void; 
+
+    uint64_t operator()(const XXH128_hash_t& h) const noexcept {
+        // Fold the 128-bit hash down to 64-bit for bucketing
+        return h.low64 ^ h.high64;
+    }
+};
+
+struct XXH128Equal {
+    bool operator()(const XXH128_hash_t& a, const XXH128_hash_t& b) const noexcept {
+        return a.low64 == b.low64 && a.high64 == b.high64;
+    }
+};
 
 // -------------------------- Utilities --------------------------
 static inline bool read_exact(std::istream& in, void* dst, size_t n) {
@@ -114,13 +133,6 @@ public:
     inline void reset() { hash = 0; }
 };
 
-// -------------------------- Fast Hash (Content Defined) --------------------------
-static inline uint64_t ultraFastHash(const uint8_t* data, size_t len) {
-    return XXH3_64bits(data, len);
-}
-
-
-
 // -------------------------- Bloom Filter --------------------------
 class BloomFilter {
     std::vector<uint64_t> bits; // BLOOM_SIZE bits
@@ -129,33 +141,51 @@ class BloomFilter {
     static inline size_t h3(uint64_t k){ return (k * 0xc6a4a7935bd1e995ULL) % BLOOM_SIZE; }
 public:
     BloomFilter() : bits(BLOOM_SIZE/64, 0) {}
-    inline void insert(uint64_t v){ size_t a=h1(v), b=h2(v), c=h3(v); bits[a/64]|=1ULL<<(a%64); bits[b/64]|=1ULL<<(b%64); bits[c/64]|=1ULL<<(c%64); }
-    inline bool mayContain(uint64_t v) const { size_t a=h1(v), b=h2(v), c=h3(v); return (bits[a/64]>> (a%64) &1ULL) && (bits[b/64]>> (b%64) &1ULL) && (bits[c/64]>> (c%64) &1ULL); }
+    inline void clear() { std::fill(bits.begin(), bits.end(), 0); }
+    inline void insert(const XXH128_hash_t& v) { 
+        size_t a = h1(v.low64), b = h2(v.high64), c = h3(v.low64 ^ v.high64); 
+        bits[a/64] |= 1ULL << (a%64); 
+        bits[b/64] |= 1ULL << (b%64); 
+        bits[c/64] |= 1ULL << (c%64); 
+    }
+    inline bool mayContain(const XXH128_hash_t& v) const { 
+        size_t a = h1(v.low64), b = h2(v.high64), c = h3(v.low64 ^ v.high64); 
+        return (bits[a/64] >> (a%64) & 1ULL) && (bits[b/64] >> (b%64) & 1ULL) && (bits[c/64] >> (c%64) & 1ULL); 
+    }
 };
 
 // -------------------------- OptimizedFastCDC --------------------------
 class OptimizedFastCDC {
-    std::unordered_map<uint64_t, uint64_t> chunkIndex; // hash -> src pos
+    // Replaced std::unordered_map with ankerl::unordered_dense::map
+    ankerl::unordered_dense::map<XXH128_hash_t, uint64_t, XXH128Hasher, XXH128Equal> chunkIndex; 
     BloomFilter bloomFilter;
-    std::vector<uint8_t> ioBuf; // shared streaming buffer
+    std::vector<uint8_t> ioBuf; // shared streaming buffer for emit/apply
 
-    std::vector<MultiLevelChunk> findMultiLevelChunks(const char* filename) {
+    // Replaced memory-heavy vector return with a streaming callback pattern.
+    // Callback signature: void(const MultiLevelChunk& chunk_metadata, const uint8_t* chunk_data)
+    template <typename Callback>
+    void processMultiLevelChunks(const char* filename, Callback callback) {
         std::ifstream file(filename, std::ios::binary);
         if (!file) throw std::runtime_error(std::string("Cannot open file: ") + filename);
-        std::vector<MultiLevelChunk> chunks;
-        if (ioBuf.size() < BUFFER_SIZE) ioBuf.resize(BUFFER_SIZE);
 
+        // Uses a dedicated local buffer so it doesn't conflict with emit_insert's ioBuf
+        std::vector<uint8_t> localIoBuf(BUFFER_SIZE);
         OptimizedGearHash gh;
         uint64_t filePos = 0, chunkStart = 0; size_t chunkLen = 0;
-        std::vector<uint8_t> chunkBuf; chunkBuf.reserve(NORMAL_MAX);
+        
+        std::vector<uint8_t> chunkBuf; 
+        chunkBuf.reserve(NORMAL_MAX);
 
         while (file) {
-            file.read(reinterpret_cast<char*>(ioBuf.data()), BUFFER_SIZE);
+            file.read(reinterpret_cast<char*>(localIoBuf.data()), BUFFER_SIZE);
             size_t bytesRead = file.gcount();
-            for (size_t i=0;i<bytesRead;i++){
-                uint8_t byte = ioBuf[i];
-                chunkBuf.push_back(byte); gh.roll(byte); chunkLen++;
-                uint8_t level = 2; bool isEnd = false;
+            for (size_t i = 0; i < bytesRead; i++) {
+                uint8_t byte = localIoBuf[i];
+                chunkBuf.push_back(byte); 
+                gh.roll(byte); 
+                chunkLen++;
+                uint8_t level = 2; 
+                bool isEnd = false;
                 
                 // Evaluate boundaries without hard-capping early
                 if (chunkLen >= NORMAL_MIN && gh.isBoundary((chunkLen <= NORMAL_AVG) ? NORMAL_MASK_S : NORMAL_MASK_L, chunkLen, NORMAL_AVG)) {
@@ -170,13 +200,12 @@ class OptimizedFastCDC {
                 if (chunkLen >= NORMAL_MAX) {
                     level = 2; isEnd = true;
                 }
-                // Inside the isEnd block of findMultiLevelChunks:
+                
                 if (isEnd) {
-                    // We compute both. XXH3 is so fast this won't hurt performance.
                     XXH128_hash_t h128 = XXH3_128bits(chunkBuf.data(), chunkLen);
-                    uint64_t h64 = h128.low64; // Use the lower 64 bits of the 128-bit hash as the 64-bit version
-
-                    chunks.push_back({chunkStart, static_cast<uint32_t>(chunkLen), h64, h128, level});
+                    
+                    // Instantly process chunk to avoid keeping vectors in memory
+                    callback({chunkStart, static_cast<uint32_t>(chunkLen), h128, level}, chunkBuf.data());
                     
                     chunkStart = filePos + i + 1; 
                     chunkLen = 0; 
@@ -188,16 +217,19 @@ class OptimizedFastCDC {
         }
         if (chunkLen > 0) {
             XXH128_hash_t h128 = XXH3_128bits(chunkBuf.data(), chunkLen);
-            chunks.push_back({chunkStart, static_cast<uint32_t>(chunkLen), h128.low64, h128, 2});
+            callback({chunkStart, static_cast<uint32_t>(chunkLen), h128, 2}, chunkBuf.data());
         }
-        return chunks;
     }
 
-    inline bool fastVerifyChunk(std::ifstream& file, uint64_t pos, const uint8_t* data, uint32_t len, uint64_t hash) {
+    inline bool fastVerifyChunk(std::ifstream& file, uint64_t pos, const uint8_t* data, uint32_t len, const XXH128_hash_t& hash) {
         if (!bloomFilter.mayContain(hash)) return false;
-        static std::vector<uint8_t> tmp; if (tmp.size() < len) tmp.resize(len);
-        file.clear(); file.seekg(pos);
+        static std::vector<uint8_t> tmp; 
+        if (tmp.size() < len) tmp.resize(len);
+        
+        file.clear(); 
+        file.seekg(pos);
         file.read(reinterpret_cast<char*>(tmp.data()), len);
+        
         return static_cast<size_t>(file.gcount()) == len && memcmp(tmp.data(), data, len) == 0;
     }
 
@@ -234,21 +266,19 @@ public:
         uint64_t srcSize = src.tellg();
         src.close();
 
-        // 2. Generate Chunks
-        auto chunks = findMultiLevelChunks(srcFile);
-
-        // 3. Write Signature File
+        // 2. Write Signature File Header
         std::ofstream sig(sigFile, std::ios::binary);
         SignatureHeader hdr;
         hdr.srcSize = srcSize;
         hdr.hashLen = static_cast<uint8_t>(srcHashStr.size());
         std::memcpy(hdr.srcHash, srcHashStr.c_str(), hdr.hashLen);
-        
         write_val(sig, hdr);
-        for (const auto& c : chunks) {
-            SigEntry entry = {c.hash128, c.pos, c.len}; // Save 128-bit
+        
+        // 3. Generate and stream chunks directly to disk
+        processMultiLevelChunks(srcFile, [&](const MultiLevelChunk& c, const uint8_t*) {
+            SigEntry entry = {c.hash, c.pos, c.len}; 
             write_val(sig, entry);
-        }
+        });
     }
 
     void createPatchFromSignature(const char* sigFile, const char* dstFile, const char* patchFile) {
@@ -258,6 +288,9 @@ public:
         std::ofstream patch(patchFile, std::ios::binary);
         if (!sig || !dst || !patch) throw std::runtime_error("Cannot open files for signature patching");
 
+        chunkIndex.clear();
+        bloomFilter.clear();
+
         // 1. Load Signature
         SignatureHeader hdr;
         if (!read_exact(sig, &hdr, sizeof(SignatureHeader))) throw std::runtime_error("Invalid signature header");
@@ -265,18 +298,13 @@ public:
         std::string srcHashStr(hdr.srcHash, hdr.hashLen);
         
         while (true) {
-            SigEntry e; // This now contains XXH128_hash_t hash;
+            SigEntry e; 
             if (!read_exact(sig, &e, sizeof(SigEntry))) break;
-
-            // --- CHANGE HERE ---
-            // We use the low 64 bits of the 128-bit hash for our RAM-efficient map.
-            // This makes the logic identical to the 64-bit createPatch method.
-            uint64_t h64 = e.hash.low64; 
-            chunkIndex[h64] = e.pos;
-            bloomFilter.insert(h64);
+            chunkIndex[e.hash] = e.pos;
+            bloomFilter.insert(e.hash);
         }
 
-        // 2. Setup Patch Header (Identical to createPatch)
+        // 2. Setup Patch Header 
         dst.seekg(0, std::ios::end);
         uint64_t dstSize = dst.tellg();
         dst.seekg(0);
@@ -294,8 +322,7 @@ public:
         write_val(patch, hashLen);
         patch.write(srcHashStr.c_str(), hashLen);
 
-        // 3. Process Destination and find matches
-        auto dstChunks = findMultiLevelChunks(dstFile);
+        // 3. Process Destination and find matches (Streaming)
         uint64_t cursor = 0;
         bool hasPendingCopy = false;
         uint64_t pendingSrcPos = 0, pendingLen = 0;
@@ -309,12 +336,10 @@ public:
             }
         };
 
-        for (const auto& c : dstChunks) {
-            // --- CHANGE HERE ---
-            // Use c.hash64 (which you now derive from the 128-bit low64 in findMultiLevelChunks)
-            auto it = chunkIndex.find(c.hash64);
+        processMultiLevelChunks(dstFile, [&](const MultiLevelChunk& c, const uint8_t*) {
+            auto it = chunkIndex.find(c.hash);
             
-            if (it != chunkIndex.end() && bloomFilter.mayContain(c.hash64)) {
+            if (it != chunkIndex.end() && bloomFilter.mayContain(c.hash)) {
                 if (c.pos > cursor) {
                     flush_copy();
                     emit_insert(patch, dst, cursor, c.pos - cursor, ioBuf);
@@ -330,11 +355,12 @@ public:
                 }
                 cursor = c.pos + c.len;
             }
-        }
+        });
 
         flush_copy();
         if (cursor < dstSize) emit_insert(patch, dst, cursor, dstSize - cursor, ioBuf);
     }
+    
     void createPatch(const char* srcFile, const char* dstFile, const char* patchFile){
         if (ioBuf.size() < BUFFER_SIZE) ioBuf.resize(BUFFER_SIZE);
         std::ifstream src(srcFile, std::ios::binary);
@@ -375,13 +401,14 @@ public:
         write_val(patch, hashLen);
         patch.write(srcHashStr.c_str(), hashLen);
 
-        // Build index from source
-        auto srcChunks = findMultiLevelChunks(srcFile);
-        for (const auto& c : srcChunks) { chunkIndex[c.hash64] = c.pos; bloomFilter.insert(c.hash64); }
+        chunkIndex.clear();
+        bloomFilter.clear();
 
-        // Process destination
-        auto dstChunks = findMultiLevelChunks(dstFile);
-        std::vector<uint8_t> chunkData; chunkData.reserve(NORMAL_MAX);
+        // Build index from source using Streaming!
+        processMultiLevelChunks(srcFile, [&](const MultiLevelChunk& c, const uint8_t*) {
+            chunkIndex[c.hash] = c.pos; 
+            bloomFilter.insert(c.hash);
+        });
 
         uint64_t cursor = 0; // emitted up to this dst offset
 
@@ -399,16 +426,14 @@ public:
             }
         };
 
-        for (const auto& c : dstChunks) {
-            auto it = chunkIndex.find(c.hash64);
-            if (it == chunkIndex.end()) continue;
+        // Process destination using Streaming!
+        processMultiLevelChunks(dstFile, [&](const MultiLevelChunk& c, const uint8_t* data) {
+            auto it = chunkIndex.find(c.hash);
+            if (it == chunkIndex.end()) return;
 
-            // Read candidate chunk from dst and verify with src
-            if (chunkData.size() < c.len) chunkData.resize(c.len);
-            dst.clear(); dst.seekg(c.pos);
-            dst.read(reinterpret_cast<char*>(chunkData.data()), c.len);
-            if (static_cast<size_t>(dst.gcount()) != c.len) continue;
-            if (!fastVerifyChunk(src, it->second, chunkData.data(), c.len, c.hash64)) continue;
+            // We use 'data' directly from the callback!
+            // This skips reading the chunk from dst to verify against src.
+            if (!fastVerifyChunk(src, it->second, data, c.len, c.hash)) return;
 
             // Emit gap [cursor, c.pos) as an INSERT
             if (c.pos > cursor) {
@@ -420,7 +445,7 @@ public:
             // Coalesce COPY commands if contiguous in BOTH source and destination
             if (hasPendingCopy && 
                 it->second == pendingSrcPos + pendingLen && // Contiguous in Source
-                c.pos == cursor)                          // Contiguous in Destination
+                c.pos == cursor)                            // Contiguous in Destination
             {
                 pendingLen += c.len; // Merge!
             } else {
@@ -431,7 +456,7 @@ public:
             }
 
             cursor = c.pos + c.len;
-        }
+        });
 
         flush_copy(); // flush final
 
@@ -453,10 +478,8 @@ public:
         auto read_u32 = [&](uint32_t&v){ return read_exact(patch, &v, 4); };
         auto read_u64 = [&](uint64_t&v){ return read_exact(patch, &v, 8); };
 
-        // Inside applyPatch
         uint8_t hdr; 
         if (!read_u8(hdr)) throw std::runtime_error("Empty patch");
-        // Since you are in dev, you can just log it or check it simply
         if (hdr != 0xFF) Logger::Log(LOG_WARNING, "Experimental patch format detected");
 
         uint64_t expected;
@@ -472,6 +495,7 @@ public:
         }
         std::string patchVersion(verBuf.data(), versionLen);
         Logger::Log(LOG_INFO, "Patch created using: " + patchVersion);
+        
         // Read Hash
         uint8_t storedHashLen;
         if (!read_u8(storedHashLen)) {
@@ -578,6 +602,7 @@ void createPatchFromSig(const char* sig, const char* dst, const char* patch) {
     OptimizedFastCDC cdc;
     cdc.createPatchFromSignature(sig, dst, patch);
 }
+
 void createPatch(const char* src, const char* dst, const char* patch) {
     OptimizedFastCDC cdc;
     cdc.createPatch(src, dst, patch);
