@@ -252,7 +252,7 @@ public:
         src.close();
 
         std::ofstream sig(sigFile, std::ios::binary);
-        SignatureHeader64 hdr;
+        SignatureHeader64 hdr{};
         hdr.srcSize = srcSize;
         hdr.hashLen = static_cast<uint8_t>(srcHashStr.size());
         std::memcpy(hdr.srcHash, srcHashStr.c_str(), hdr.hashLen);

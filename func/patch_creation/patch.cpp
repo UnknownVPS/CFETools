@@ -268,7 +268,7 @@ public:
 
         // 2. Write Signature File Header
         std::ofstream sig(sigFile, std::ios::binary);
-        SignatureHeader hdr;
+        SignatureHeader hdr{};
         hdr.srcSize = srcSize;
         hdr.hashLen = static_cast<uint8_t>(srcHashStr.size());
         std::memcpy(hdr.srcHash, srcHashStr.c_str(), hdr.hashLen);
