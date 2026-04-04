@@ -10,12 +10,14 @@
 #include <memory>
 #include <array>
 #include <unordered_map>
+#include <map>
 #include <chrono>
 #include <ctime>
 #include <csignal>
 #include <atomic>
 #include <thread>
 #include <format>
+
 namespace fs = std::filesystem;
 
 namespace {
@@ -28,7 +30,21 @@ namespace {
         size_t page_size = 100;
         int thread_pool_size = 1;
         bool follow_symlinks = false;
+        bool is_cfup_mode = false;
     } g_config;
+
+    // --- CFUP Support Structures ---
+    struct CfupNode {
+        bool is_dir = true;
+        uint64_t offset = 0;
+        uint64_t size = 0;
+        std::map<std::string, std::shared_ptr<CfupNode>> children;
+    };
+    
+    std::shared_ptr<CfupNode> g_cfup_root;
+    std::string g_cfup_file_path;
+    fs::file_time_type g_cfup_time_val;
+    std::string g_cfup_time_str;
 
     // Signal handler for graceful shutdown
     void signal_handler(int signum) {
@@ -92,6 +108,29 @@ namespace {
         std::ostringstream ss;
         ss << std::fixed << std::setprecision(2) << count << " " << suffixes[s];
         return ss.str();
+    }
+
+    // File time to string converter
+    std::string time_to_string(fs::file_time_type ftime) {
+        try {
+            auto sctp = std::chrono::time_point_cast<std::chrono::system_clock::duration>(
+                ftime - fs::file_time_type::clock::now() + std::chrono::system_clock::now()
+            );
+            
+            auto sys_time_t = std::chrono::system_clock::to_time_t(sctp);
+            std::tm tm;
+            #ifdef _WIN32
+                localtime_s(&tm, &sys_time_t);
+            #else
+                localtime_r(&sys_time_t, &tm);
+            #endif
+            
+            std::ostringstream oss;
+            oss << std::put_time(&tm, "%Y-%m-%d %H:%M");
+            return oss.str();
+        } catch (...) {
+            return "-";
+        }
     }
 
     // Get current timestamp string
@@ -163,8 +202,136 @@ namespace {
         return html.str();
     }
 
-    // Serve directory listing (Raw UI)
-    void serve_directory(const fs::path& dir_path, const std::string& url_path, 
+    // Virtual Directory Entry format for uniform logic
+    struct VDirEntry {
+        std::string name;
+        bool is_dir = false;
+        uintmax_t size = 0;
+        fs::file_time_type time_val;
+        std::string time_str;
+    };
+
+    // Fast memory index loader for CFUP files
+    bool load_cfup_index(const std::string& filepath) {
+        std::error_code fs_ec;
+        uintmax_t file_size_total = fs::file_size(filepath, fs_ec);
+        if (fs_ec) {
+            std::cerr << "[CFUP Error] Failed to get total file size: " << fs_ec.message() << std::endl;
+            return false;
+        }
+
+        std::ifstream in(filepath, std::ios::binary);
+        if (!in) {
+            std::cerr << "[CFUP Error] Failed to open file stream." << std::endl;
+            return false;
+        }
+        
+        uint32_t file_count = 0;
+        if (!in.read(reinterpret_cast<char*>(&file_count), sizeof(file_count))) {
+            std::cerr << "[CFUP Error] Failed to read initial file count." << std::endl;
+            return false;
+        }
+        
+        // Basic sanity check to avoid OOM
+        if (file_count > 10000000) { 
+            std::cerr << "[CFUP Error] Sanity check failed: file_count=" << file_count << " is suspiciously large." << std::endl;
+            return false; 
+        }
+        
+        g_cfup_root = std::make_shared<CfupNode>();
+        g_cfup_file_path = filepath;
+        
+        std::error_code ec;
+        g_cfup_time_val = fs::last_write_time(filepath, ec);
+        g_cfup_time_str = ec ? "-" : time_to_string(g_cfup_time_val);
+        
+        size_t successful_files = 0;
+
+        for (uint32_t i = 0; i < file_count; ++i) {
+            uint32_t path_len = 0;
+            if (!in.read(reinterpret_cast<char*>(&path_len), sizeof(path_len))) {
+                std::cerr << "[CFUP Warning] Unexpected EOF reading path length at item " << i << ". Archive may be truncated." << std::endl;
+                break;
+            }
+            
+            // Length Sanity Check
+            if (path_len == 0 || path_len > 65536) { 
+                std::cerr << "[CFUP Warning] Invalid path length (" << path_len << ") at item index " << i << ". Stopping parse." << std::endl;
+                break; 
+            }
+            
+            std::string rel_path(path_len, '\0');
+            if (!in.read(rel_path.data(), path_len)) {
+                std::cerr << "[CFUP Warning] Failed reading path string at item index " << i << ". Archive may be truncated." << std::endl;
+                break;
+            }
+            
+            uint64_t data_size = 0;
+            if (!in.read(reinterpret_cast<char*>(&data_size), sizeof(data_size))) {
+                std::cerr << "[CFUP Warning] Failed reading data payload size at item index " << i << ". Archive may be truncated." << std::endl;
+                break;
+            }
+            
+            uint64_t offset = in.tellg();
+            if (offset == static_cast<uint64_t>(-1)) {
+                std::cerr << "[CFUP Error] Stream tellg() failed at item index " << i << ". Possible 32-bit limitation or broken stream state." << std::endl;
+                break;
+            }
+
+            if (offset + data_size > file_size_total) {
+                std::cerr << "\n[CFUP Warning] Truncation safely triggered!\n"
+                          << "-> Item " << i << " (" << rel_path << ") requires " << data_size << " bytes.\n"
+                          << "-> But only " << (file_size_total - offset) << " bytes remain in the file.\n"
+                          << "-> The archive file on disk is incomplete (likely a failed download or copy).\n"
+                          << "-> Mounting in 'Best-Effort' mode. Proceeding with the " << successful_files << " valid files found so far...\n" << std::endl;
+                break; // Stop parsing, but keep what we have
+            }
+            
+            // Register path in hierarchy
+            std::string remaining = rel_path;
+            std::replace(remaining.begin(), remaining.end(), '\\', '/'); // Standardize slashes
+            
+            auto curr = g_cfup_root;
+            size_t pos = 0;
+            while ((pos = remaining.find('/')) != std::string::npos) {
+                std::string part = remaining.substr(0, pos);
+                remaining = remaining.substr(pos + 1);
+                if (part.empty() || part == ".") continue;
+                
+                if (curr->children.find(part) == curr->children.end()) {
+                    curr->children[part] = std::make_shared<CfupNode>();
+                }
+                curr = curr->children[part];
+            }
+            if (!remaining.empty()) {
+                auto leaf = std::make_shared<CfupNode>();
+                leaf->is_dir = false;
+                leaf->offset = offset;
+                leaf->size = data_size;
+                curr->children[remaining] = leaf;
+            }
+            
+            successful_files++;
+            
+            // Skip directly over the data payload in O(1) time
+            in.seekg(offset + data_size, std::ios::beg);
+            
+            // Attempt to clear EOF if we gracefully landed precisely at the end of the file mid-loop
+            if (!in.good() && i != file_count - 1) {
+                in.clear();
+            }
+        }
+        
+        if (successful_files == 0) {
+            std::cerr << "[CFUP Error] Archive is completely invalid. No files could be parsed." << std::endl;
+            return false;
+        }
+
+        return true;
+    }
+
+    // Serve directory listing (Raw UI adapted for Generic Entries)
+    void serve_directory_generic(const std::vector<VDirEntry>& raw_entries, const std::string& url_path, 
                         const std::unordered_map<std::string, std::string>& query_params,
                         httplib::Response& res) {
         
@@ -201,80 +368,37 @@ namespace {
 
         const bool sort_desc = (sort_order == "desc");
 
-        // Collect and filter entries
-        std::vector<fs::directory_entry> entries;
-        std::error_code dir_ec;
-        
-        for (auto& entry : fs::directory_iterator(dir_path, dir_ec)) {
-            if (dir_ec) continue;
-            
-            std::string filename = entry.path().filename().string();
-            
-            // Filter hidden files
-            if (!show_hidden && !filename.empty() && filename[0] == '.') {
+        // Filter entries
+        std::vector<VDirEntry> entries;
+        for (const auto& entry : raw_entries) {
+            if (!show_hidden && !entry.name.empty() && entry.name[0] == '.') {
                 continue;
             }
-            
             entries.push_back(entry);
         }
 
         // Sort: directories first, then by criteria
-        std::sort(entries.begin(), entries.end(), [&](const fs::directory_entry& a, const fs::directory_entry& b) {
-            bool a_is_dir = a.is_directory();
-            bool b_is_dir = b.is_directory();
-            
+        std::sort(entries.begin(), entries.end(), [&](const VDirEntry& a, const VDirEntry& b) {
             // Always prioritize directories
-            if (a_is_dir != b_is_dir) {
-                return a_is_dir;
+            if (a.is_dir != b.is_dir) {
+                return a.is_dir;
             }
 
             // Compare based on sort_by
-            if (sort_by == "name") {
-                std::string a_name = a.path().filename().string();
-                std::string b_name = b.path().filename().string();
-                return sort_desc ? (a_name > b_name) : (a_name < b_name);
+            if (sort_by == "name" || sort_by == "type") {
+                return sort_desc ? (a.name > b.name) : (a.name < b.name);
             } 
-                        else if (sort_by == "size") {
-                std::error_code ec1, ec2;
-                uintmax_t a_size = a_is_dir ? 0 : fs::file_size(a, ec1);
-                uintmax_t b_size = b_is_dir ? 0 : fs::file_size(b, ec2);
-                if (ec1) a_size = 0;
-                if (ec2) b_size = 0;
-                
-                // If sizes are equal, fallback to name for stability
-                if (a_size == b_size) {
-                     std::string a_name = a.path().filename().string();
-                     std::string b_name = b.path().filename().string();
-                     return a_name < b_name;
-                }
-                return sort_desc ? (a_size > b_size) : (a_size < b_size);
+            else if (sort_by == "size") {
+                if (a.size == b.size) return a.name < b.name; // Fallback
+                return sort_desc ? (a.size > b.size) : (a.size < b.size);
             } 
             else if (sort_by == "time") {
-                std::error_code ec1, ec2;
-                auto a_time = fs::last_write_time(a.path(), ec1);
-                auto b_time = fs::last_write_time(b.path(), ec2);
-                if (ec1) a_time = fs::file_time_type::min(); 
-                if (ec2) b_time = fs::file_time_type::min();
-                
-                // If times are equal, fallback to name
-                if (a_time == b_time) {
-                     std::string a_name = a.path().filename().string();
-                     std::string b_name = b.path().filename().string();
-                     return a_name < b_name;
-                }
-                return sort_desc ? (a_time > b_time) : (a_time < b_time);
-            }
-            else if (sort_by == "type") {
-                // Type is just DIR vs FILE. Since we separated them above,
-                // sorting by type within the groups essentially just sorts by name
-                // or is redundant. We default to name sorting here.
-                std::string a_name = a.path().filename().string();
-                std::string b_name = b.path().filename().string();
-                return sort_desc ? (a_name > b_name) : (a_name < b_name);
+                if (a.time_val == b.time_val) return a.name < b.name; // Fallback
+                return sort_desc ? (a.time_val > b.time_val) : (a.time_val < b.time_val);
             }
             
             // Fallback
-            return a.path().filename().string() < b.path().filename().string();
+            return a.name < b.name;
         });
 
         // Calculate pagination
@@ -282,36 +406,6 @@ namespace {
         size_t total_pages = (total_entries + page_size - 1) / page_size;
         size_t start_idx = (page - 1) * page_size;
         size_t end_idx = std::min(start_idx + page_size, total_entries);
-
-        // Helper to convert file_time to string using <format> and clock_cast
-        auto format_file_time = [](const fs::path& p) -> std::string {
-            std::error_code ec;
-            auto ftime = fs::last_write_time(p, ec);
-            if (ec) return "-";
-            
-            try {
-                // Manual conversion instead of clock_cast for Android compatibility
-                // filesystem::file_time_type uses a different epoch, convert manually
-                auto sctp = std::chrono::time_point_cast<std::chrono::system_clock::duration>(
-                    ftime - fs::file_time_type::clock::now() + std::chrono::system_clock::now()
-                );
-                
-                // Convert to time_t for formatting (C++20 std::format not available on Android NDK)
-                auto sys_time_t = std::chrono::system_clock::to_time_t(sctp);
-                std::tm tm;
-                #ifdef _WIN32
-                    localtime_s(&tm, &sys_time_t);
-                #else
-                    localtime_r(&sys_time_t, &tm);
-                #endif
-                
-                std::ostringstream oss;
-                oss << std::put_time(&tm, "%Y-%m-%d %H:%M");
-                return oss.str();
-            } catch (...) {
-                return "-";
-            }
-        };
 
         // Helper to generate sort links
         auto get_sort_header = [&](const std::string& column, const std::string& label) -> std::string {
@@ -387,36 +481,26 @@ namespace {
         } else {
             for (size_t i = start_idx; i < end_idx; ++i) {
                 auto& entry = entries[i];
-                std::string name = entry.path().filename().string();
-                std::string safe_name = html_escape(name);
-                std::string link = url_path + name;
+                std::string safe_name = html_escape(entry.name);
+                std::string link = url_path + entry.name;
                 
-                bool is_dir = entry.is_directory();
-                if (is_dir) link += "/";
+                if (entry.is_dir) link += "/";
 
-                std::string size_str = "-";
-                std::string time_str = format_file_time(entry.path());
-                
-                if (!is_dir) {
-                    std::error_code ec;
-                    auto size = fs::file_size(entry.path(), ec);
-                    if (!ec) size_str = format_size(size);
-                }
-
-                std::string icon = is_dir ? "[DIR]" : "[FILE]";
+                std::string size_str = entry.is_dir ? "-" : format_size(entry.size);
+                std::string icon = entry.is_dir ? "[DIR]" : "[FILE]";
 
                 html << "            <tr>";
                 html << "<td>" << icon << " ";
-                if (is_dir) {
+                if (entry.is_dir) {
                     html << "<b><a href=\"" << link << "\">" << safe_name << "/</a></b>";
                 } else {
                     html << "<a href=\"" << link << "\">" << safe_name << "</a>";
                 }
                 html << "</td>";
-                html << "<td>" << (is_dir ? "DIR" : "FILE") << "</td>";
+                html << "<td>" << (entry.is_dir ? "DIR" : "FILE") << "</td>";
                 html << "<td>" << size_str << "</td>";
-                html << "<td>" << time_str << "</td>";
-                if (is_dir) {
+                html << "<td>" << entry.time_str << "</td>";
+                if (entry.is_dir) {
                     html << "<td><button class=\"btn\" onclick=\"window.location.href='" << link << "'\">[Open]</button></td>";
                 } else {
                     html << "<td><a href=\"" << link << "\" download>[Download]</a></td>";
@@ -499,6 +583,7 @@ int start_server(const std::string& root_path, int port, size_t page_size, int t
     // Ensure at least 1 thread
     g_config.thread_pool_size = (thread_pool_size > 0) ? thread_pool_size : 1; 
     g_config.follow_symlinks = symlinks_enabled;
+    g_config.is_cfup_mode = false;
 
     httplib::Server svr;
 
@@ -516,8 +601,22 @@ int start_server(const std::string& root_path, int port, size_t page_size, int t
         real_root = real_root.lexically_normal();
     }
 
-    if (!fs::exists(real_root) || !fs::is_directory(real_root)) {
-        std::cerr << "Error: Directory does not exist: " << real_root << std::endl;
+    if (!fs::exists(real_root)) {
+        std::cerr << "Error: Target path does not exist: " << real_root << std::endl;
+        return 1;
+    }
+
+    if (fs::is_regular_file(real_root)) {
+        std::cout << "Detected file input. Attempting to parse as CFUP archive..." << std::endl;
+        if (load_cfup_index(real_root.string())) {
+            g_config.is_cfup_mode = true;
+            std::cout << "Successfully parsed CFUP archive index." << std::endl;
+        } else {
+            std::cerr << "Error: File provided is not a directory or a valid CFUP archive." << std::endl;
+            return 1;
+        }
+    } else if (!fs::is_directory(real_root)) {
+        std::cerr << "Error: Path is neither a directory nor a regular file." << std::endl;
         return 1;
     }
 
@@ -534,29 +633,19 @@ int start_server(const std::string& root_path, int port, size_t page_size, int t
                   << " - " << res.status << std::endl;
     });
 
-    // Path resolution helper with proper security checks
+    // Path resolution helper with proper security checks (For Normal FS Mode)
     auto resolve_safe_path = [&real_root](const std::string& url_path) -> std::string {
-        // URL decode first
         std::string decoded = url_decode(url_path);
-        
-        // Remove leading slash
         std::string rel_url = decoded;
-        if (!rel_url.empty() && rel_url[0] == '/') {
-            rel_url.erase(0, 1);
-        }
+        if (!rel_url.empty() && rel_url[0] == '/') rel_url.erase(0, 1);
 
-        // Combine and normalize
         fs::path combined = (real_root / fs::path(rel_url)).lexically_normal();
 
-        // Security check: ensure the path is within root
         std::string combined_str = combined.string();
         std::string root_str = real_root.string();
         
-        // On Windows, preferred_separator is wchar_t, but we are using std::string (char).
-        // We need to cast it to char for string operations.
         const char path_sep = static_cast<char>(fs::path::preferred_separator);
 
-        // Ensure root_str ends with separator for accurate prefix matching
         if (!root_str.empty() && root_str.back() != path_sep) {
             root_str += path_sep;
         }
@@ -565,15 +654,12 @@ int start_server(const std::string& root_path, int port, size_t page_size, int t
             combined_str += path_sep;
         }
 
-        // Check if combined path starts with root path
         if (combined_str.size() < root_str.size() || 
             combined_str.substr(0, root_str.size()) != root_str) {
-            // Allow exact match with root
             if (combined_str + path_sep != root_str) {
                 return ""; // Path traversal detected
             }
         }
-
         return combined.string();
     };
 
@@ -585,99 +671,77 @@ int start_server(const std::string& root_path, int port, size_t page_size, int t
         res.set_header("Access-Control-Allow-Headers", "Content-Type");
 
         std::string url_path = req.path;
-        std::string fs_path = resolve_safe_path(url_path);
-
-        if (fs_path.empty()) {
-            res.status = 403;
-            res.set_content(generate_error_page(403, "Forbidden", "Access to this path is not allowed"), "text/html");
-            return;
-        }
-
-        fs::path p = fs::path(fs_path);
-
-        // Check if path exists
-        std::error_code exists_ec;
-        bool exists = fs::exists(p, exists_ec);
         
-        if (exists_ec || !exists) {
-            res.status = 404;
-            res.set_content(generate_error_page(404, "Not Found", "The requested resource could not be found"), "text/html");
-            return;
+        std::unordered_map<std::string, std::string> query_params;
+        for (const auto& param : req.params) {
+            query_params[param.first] = param.second;
         }
 
-        // Handle symlinks based on config
-        if (!g_config.follow_symlinks) {
-            std::error_code ec;
+        // --- CFUP ARCHIVE HANDLING ---
+        if (g_config.is_cfup_mode) {
+            std::string decoded = url_decode(url_path);
             
-            // 1. Get the physical path (resolves all symlinks)
-            fs::path canonical_path = fs::canonical(p, ec);
+            // Path traversal guard (CFUP is locked environment)
+            if (decoded.find("..") != std::string::npos) {
+                res.status = 403;
+                res.set_content(generate_error_page(403, "Forbidden", "Invalid path traversal"), "text/html");
+                return;
+            }
 
-            if (!ec) {
-                // Helper lambda to remove trailing separators for fair comparison
-                auto normalize_path_str = [](const std::string& path) -> std::string {
-                    std::string res = path;
-                    const char sep = static_cast<char>(fs::path::preferred_separator);
-                    // Remove trailing slashes
-                    while (!res.empty() && res.back() == sep) {
-                        res.pop_back();
-                    }
-                    return res;
-                };
+            // Traverse CFUP Virtual Tree
+            auto curr = g_cfup_root;
+            std::string remaining = decoded;
+            
+            if (!remaining.empty() && remaining[0] == '/') remaining = remaining.substr(1);
+            if (!remaining.empty() && remaining.back() == '/') remaining.pop_back();
 
-                // Compare normalized strings
-                std::string req_str = normalize_path_str(p.string());
-                std::string real_str = normalize_path_str(canonical_path.string());
-
-                if (req_str != real_str) {
-                    res.status = 403;
-                    res.set_content(generate_error_page(403, "Forbidden", "Symbolic links are not followed"), "text/html");
-                    return;
+            bool found = true;
+            if (!remaining.empty()) {
+                size_t pos = 0;
+                while ((pos = remaining.find('/')) != std::string::npos) {
+                    std::string part = remaining.substr(0, pos);
+                    remaining = remaining.substr(pos + 1);
+                    if (part.empty() || part == ".") continue;
+                    
+                    if (curr->children.find(part) == curr->children.end()) { found = false; break; }
+                    curr = curr->children[part];
                 }
+                if (found && !remaining.empty()) {
+                    if (curr->children.find(remaining) == curr->children.end()) { found = false; }
+                    else { curr = curr->children[remaining]; }
+                }
+            }
+
+            if (!found) {
+                res.status = 404;
+                res.set_content(generate_error_page(404, "Not Found", "Resource not found in CFUP archive"), "text/html");
+                return;
+            }
+
+            if (curr->is_dir) {
+                if (url_path.back() != '/') { res.set_redirect(url_path + "/"); return; }
+                
+                std::vector<VDirEntry> entries;
+                for (auto& [name, child] : curr->children) {
+                    VDirEntry e;
+                    e.name = name;
+                    e.is_dir = child->is_dir;
+                    e.size = child->size;
+                    e.time_val = g_cfup_time_val;
+                    e.time_str = g_cfup_time_str;
+                    entries.push_back(e);
+                }
+                serve_directory_generic(entries, url_path, query_params, res);
+                return;
             } else {
-                // Fallback for broken symlinks (where canonical might fail)
-                if (fs::is_symlink(p, ec) && !ec) {
-                    res.status = 403;
-                    res.set_content(generate_error_page(403, "Forbidden", "Symbolic links are not followed"), "text/html");
-                    return;
-                }
-            }
-        }
+                // File streaming directly from CFUP
+                uintmax_t file_size = curr->size;
+                std::string range_header = req.get_header_value("Range");
+                uintmax_t start = 0;
+                uintmax_t end = file_size - 1;
+                bool is_range = false;
 
-        // Handle directories
-        if (fs::is_directory(p)) {
-            if (url_path.back() != '/') {
-                res.set_redirect(url_path + "/");
-                return;
-            }
-            
-            // FIX: httplib parses query strings into req.params automatically.
-            // We use req.params instead of manually parsing req.path.
-            std::unordered_map<std::string, std::string> query_params;
-            for (const auto& param : req.params) {
-                query_params[param.first] = param.second;
-            }
-            
-            serve_directory(p, url_path, query_params, res);
-            return;
-        }
-
-        else {
-            std::error_code size_ec;
-            uintmax_t file_size = fs::file_size(p, size_ec);
-            if (size_ec) {
-                res.status = 500;
-                res.set_content("Could not determine file size", "text/plain");
-                return;
-            }
-
-            // 1. Parse Range Header
-            std::string range_header = req.get_header_value("Range");
-            uintmax_t start = 0;
-            uintmax_t end = file_size - 1;
-            bool is_range = false;
-
-            if (!range_header.empty()) {
-                if (range_header.find("bytes=") == 0) {
+                if (!range_header.empty() && range_header.find("bytes=") == 0) {
                     std::string range_spec = range_header.substr(6);
                     size_t dash_pos = range_spec.find('-');
                     if (dash_pos != std::string::npos) {
@@ -690,14 +754,170 @@ int start_server(const std::string& root_path, int port, size_t page_size, int t
                             if (start < file_size && end < file_size && start <= end) {
                                 is_range = true;
                             }
-                        } catch (...) { /* Ignore invalid range */ }
+                        } catch (...) { }
                     }
+                }
+
+                uintmax_t content_length = is_range ? (end - start + 1) : file_size;
+                auto file_ptr = std::make_shared<std::ifstream>(g_cfup_file_path, std::ios::binary);
+                
+                if (!file_ptr->is_open()) {
+                    res.status = 500;
+                    res.set_content("Failed to open underlying CFUP file", "text/plain");
+                    return;
+                }
+
+                if (is_range) {
+                    res.status = 206;
+                    std::string content_range = "bytes " + std::to_string(start) + "-" + std::to_string(end) + "/" + std::to_string(file_size);
+                    res.set_header("Content-Range", content_range.c_str());
+                } else {
+                    res.status = 200;
+                    res.set_header("Accept-Ranges", "bytes");
+                }
+
+                res.set_content_provider(
+                    content_length,
+                    "application/octet-stream",
+                    [file_ptr, node_offset = curr->offset, start](size_t offset, size_t length, httplib::DataSink &sink) {
+                        uintmax_t file_pos = node_offset + start + offset;
+
+                        file_ptr->clear();
+                        file_ptr->seekg(file_pos);
+                        
+                        if (!file_ptr->good()) return false;
+
+                        const size_t chunk_size = 64 * 1024; 
+                        std::array<char, chunk_size> buffer; 
+
+                        size_t to_read = std::min(length, chunk_size);
+                        file_ptr->read(buffer.data(), to_read);
+                        size_t read_count = file_ptr->gcount();
+
+                        if (read_count > 0) {
+                            sink.write(buffer.data(), read_count);
+                        }
+                        
+                        return true;
+                    }
+                );
+                return;
+            }
+        }
+
+
+        // --- NORMAL FILESYSTEM HANDLING ---
+        std::string fs_path = resolve_safe_path(url_path);
+
+        if (fs_path.empty()) {
+            res.status = 403;
+            res.set_content(generate_error_page(403, "Forbidden", "Access to this path is not allowed"), "text/html");
+            return;
+        }
+
+        fs::path p = fs::path(fs_path);
+
+        std::error_code exists_ec;
+        bool exists = fs::exists(p, exists_ec);
+        
+        if (exists_ec || !exists) {
+            res.status = 404;
+            res.set_content(generate_error_page(404, "Not Found", "The requested resource could not be found"), "text/html");
+            return;
+        }
+
+        // Handle symlinks
+        if (!g_config.follow_symlinks) {
+            std::error_code ec;
+            fs::path canonical_path = fs::canonical(p, ec);
+
+            if (!ec) {
+                auto normalize_path_str = [](const std::string& path) -> std::string {
+                    std::string res = path;
+                    const char sep = static_cast<char>(fs::path::preferred_separator);
+                    while (!res.empty() && res.back() == sep) res.pop_back();
+                    return res;
+                };
+
+                std::string req_str = normalize_path_str(p.string());
+                std::string real_str = normalize_path_str(canonical_path.string());
+
+                if (req_str != real_str) {
+                    res.status = 403;
+                    res.set_content(generate_error_page(403, "Forbidden", "Symbolic links are not followed"), "text/html");
+                    return;
+                }
+            } else {
+                if (fs::is_symlink(p, ec) && !ec) {
+                    res.status = 403;
+                    res.set_content(generate_error_page(403, "Forbidden", "Symbolic links are not followed"), "text/html");
+                    return;
+                }
+            }
+        }
+
+        if (fs::is_directory(p)) {
+            if (url_path.back() != '/') {
+                res.set_redirect(url_path + "/");
+                return;
+            }
+            
+            std::vector<VDirEntry> entries;
+            std::error_code dir_ec;
+            
+            for (auto& entry : fs::directory_iterator(p, dir_ec)) {
+                if (dir_ec) continue;
+                
+                VDirEntry ve;
+                ve.name = entry.path().filename().string();
+                ve.is_dir = entry.is_directory();
+                
+                std::error_code ec_size;
+                ve.size = ve.is_dir ? 0 : fs::file_size(entry.path(), ec_size);
+                
+                std::error_code ec_time;
+                ve.time_val = fs::last_write_time(entry.path(), ec_time);
+                ve.time_str = ec_time ? "-" : time_to_string(ve.time_val);
+                
+                entries.push_back(ve);
+            }
+            
+            serve_directory_generic(entries, url_path, query_params, res);
+            return;
+        }
+        else {
+            std::error_code size_ec;
+            uintmax_t file_size = fs::file_size(p, size_ec);
+            if (size_ec) {
+                res.status = 500;
+                res.set_content("Could not determine file size", "text/plain");
+                return;
+            }
+
+            std::string range_header = req.get_header_value("Range");
+            uintmax_t start = 0;
+            uintmax_t end = file_size - 1;
+            bool is_range = false;
+
+            if (!range_header.empty() && range_header.find("bytes=") == 0) {
+                std::string range_spec = range_header.substr(6);
+                size_t dash_pos = range_spec.find('-');
+                if (dash_pos != std::string::npos) {
+                    try {
+                        std::string s_start = range_spec.substr(0, dash_pos);
+                        std::string s_end = range_spec.substr(dash_pos + 1);
+                        if (!s_start.empty()) start = std::stoull(s_start);
+                        if (!s_end.empty()) end = std::stoull(s_end);
+                        else end = file_size - 1;
+                        if (start < file_size && end < file_size && start <= end) {
+                            is_range = true;
+                        }
+                    } catch (...) { }
                 }
             }
 
             uintmax_t content_length = is_range ? (end - start + 1) : file_size;
 
-            // 2. Open File
             auto file_ptr = std::make_shared<std::ifstream>(p, std::ios::binary);
             if (!file_ptr->is_open()) {
                 res.status = 500;
@@ -705,7 +925,6 @@ int start_server(const std::string& root_path, int port, size_t page_size, int t
                 return;
             }
 
-            // 3. Set Headers
             if (is_range) {
                 res.status = 206;
                 std::string content_range = "bytes " + std::to_string(start) + "-" + std::to_string(end) + "/" + std::to_string(file_size);
@@ -715,7 +934,6 @@ int start_server(const std::string& root_path, int port, size_t page_size, int t
                 res.set_header("Accept-Ranges", "bytes");
             }
 
-            // 4. Stream
             res.set_content_provider(
                 content_length,
                 "application/octet-stream",
@@ -757,10 +975,12 @@ int start_server(const std::string& root_path, int port, size_t page_size, int t
     std::cout << ">> File Server Starting" << std::endl;
     std::cout << "========================================" << std::endl;
     std::cout << "Address:    http://0.0.0.0:" << port << std::endl;
-    std::cout << "Directory:  " << real_root << std::endl;
+    std::cout << "Source:     " << real_root << (g_config.is_cfup_mode ? " [CFUP Archive]" : " [Directory]") << std::endl;
     std::cout << "Threads:    " << g_config.thread_pool_size << std::endl;
     std::cout << "Page Size:  " << g_config.page_size << " items" << std::endl;
-    std::cout << "Symlinks:   " << (g_config.follow_symlinks ? "Enabled" : "Disabled") << std::endl;
+    if (!g_config.is_cfup_mode) {
+        std::cout << "Symlinks:   " << (g_config.follow_symlinks ? "Enabled" : "Disabled") << std::endl;
+    }
     std::cout << "========================================" << std::endl;
     std::cout << "Press Ctrl+C to stop the server" << std::endl;
     std::cout << std::endl;
