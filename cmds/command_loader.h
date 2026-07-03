@@ -3,8 +3,6 @@
 #include "command_base.h"
 
 #include "backup.h"
-#include "encode.h"
-#include "decode.h"
 #include "pack.h"
 #include "unpack.h"
 #include "hash.h"
