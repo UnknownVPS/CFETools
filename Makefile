@@ -73,15 +73,12 @@ VERSION_FILE = version.h
 
 # === Source and object files ===
 SRCS = utils/userinput/user_input.cpp \
-       utils/bmp/writer/bmp_writer.cpp \
-       utils/bmp/reader/bmp_reader.cpp \
 	   func/patch_creation/patch.cpp \
 	   func/patch_creation/patch64.cpp \
        utils/logger/logger.cpp \
        func/folder_packer/folder_packer.cpp \
        utils/compress/compress.cpp \
        utils/compress/decompress.cpp \
-	   utils/aio/aio_header.cpp \
 	   func/split_integrate/split_integrate.cpp \
 	   func/server/server.cpp \
 	   func/backup/backup.cpp \
