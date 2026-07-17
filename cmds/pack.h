@@ -10,7 +10,6 @@
 #include <vector>
 #include <atomic>
 #include <cstring>
-extern std::string save_path;
 
 class PackCommand : public Command {
 public:
@@ -42,7 +41,7 @@ public:
                 ? default_stem + ".cfmp"   // packed + compressed (Redundant rn, changing later)
                 : default_stem + ".cfup";
         }
-        std::filesystem::path outPath = std::filesystem::path(save_path) / output;
+        std::filesystem::path outPath = std::filesystem::path(ctx.config.save_path) / output;
 
         if (compress_level == 0) {
             // ── Plain pack, no chaining ──────────────────────────────

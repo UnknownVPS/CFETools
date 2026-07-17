@@ -3,8 +3,6 @@
 #include "../func/patch_creation/patch.h"
 #include <filesystem>
 
-extern std::string save_path;
-
 class PatchCommand : public Command {
 public:
     const char* name() const override { 
@@ -38,7 +36,7 @@ public:
         }
         
         // Build full output path in save_path
-        std::filesystem::path outputPath = std::filesystem::path(save_path) / output;
+        std::filesystem::path outputPath = std::filesystem::path(ctx.config.save_path) / output;
         
         Logger::Log(LOG_INFO, "Applying patch...");
         Logger::Log(LOG_DEBUG, "Source: " + src);

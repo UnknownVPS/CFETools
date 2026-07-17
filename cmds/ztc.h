@@ -4,8 +4,6 @@
 #include "../func/folder_packer/ztc.hpp"
 #include <filesystem>
 
-extern std::string save_path;
-
 class ZtcCommand : public Command {
 public:
     const char* name() const override { 
@@ -36,7 +34,7 @@ public:
                              std::filesystem::path(file).filename().stem().string() + ".cfup";
         
         // Build full output path in save_path
-        std::filesystem::path packedFilePath = std::filesystem::path(save_path) / output;
+        std::filesystem::path packedFilePath = std::filesystem::path(ctx.config.save_path) / output;
         
         Logger::Log(LOG_INFO, "Converting zip: " + file);
         Logger::Log(LOG_INFO, "Output archive: " + packedFilePath.string());

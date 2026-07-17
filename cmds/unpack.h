@@ -11,7 +11,6 @@
 #include <atomic>
 #include <cstring>
 
-extern std::string save_path;
 
 class UnpackCommand : public Command {
 public:
@@ -33,7 +32,7 @@ public:
             out_stem = std::filesystem::path(out_stem).stem().string();
 
         std::string output_dir = ctx.args.size() >= 2 ? ctx.args[1] : out_stem;
-        std::filesystem::path outPath = std::filesystem::path(save_path) / output_dir;
+        std::filesystem::path outPath = std::filesystem::path(ctx.config.save_path) / output_dir;
 
         std::ifstream probe(archive, std::ios::binary);
         if (!probe) { Logger::Log(LOG_ERROR, "Cannot open: " + archive); return 1; }

@@ -7,8 +7,6 @@
 #include <fstream>
 #include <iomanip>
 
-extern std::string save_path;
-
 class IntegrateCommand : public Command {
 public:
     const char* name() const override { 
@@ -31,7 +29,7 @@ public:
         std::string output_file = ctx.args[0];
         
         // Build full output path in save_path (like CompressCommand does)
-        std::filesystem::path full_output_path = std::filesystem::path(save_path) / output_file;
+        std::filesystem::path full_output_path = std::filesystem::path(ctx.config.save_path) / output_file;
         
         std::vector<std::string> share_files;
         for(size_t i = 1; i < ctx.args.size(); i++) {

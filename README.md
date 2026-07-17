@@ -26,7 +26,6 @@ CFETools is just a solo project by me, the development was advanced in some part
 - **🚀 High Performance**: Multi-threaded operations with hardware-accelerated algorithms
 - **🔒 Secure**: Military-grade encryption using libsodium (XChaCha20-Poly1305)
 - **📦 Multiple Formats**: Support for LZ4, ZSTD, LZMA2/XZ compression
-- **🎨 Steganography**: Encode files into BMP images (1-bit/8-bit modes)
 - **🔄 Binary Patching**: FastCDC-based diff/patch with deduplication
 - **🔐 Secret Sharing**: Shamir's Secret Sharing with IDA encoding
 - **🌐 Cross-Platform**: Native builds for Linux, Windows, and Android
@@ -50,12 +49,6 @@ CFETools is just a solo project by me, the development was advanced in some part
   - Blake2b key derivation
   - HMAC-SHA256 authentication
   - Password-based encryption with secure key stretching
-
-- **File Encoding**
-  - Encode files into BMP images (steganography)
-  - 1-bit monochrome or 8-bit grayscale modes
-  - All-in-one (AIO) mode with embedded metadata
-  - Two-file system for compatibility
 
 - **Folder Operations**
   - Pack folders into `.cfup` archives
@@ -142,52 +135,8 @@ cfx <command> [arguments] [options]
 
 ## 📖 Commands
 
-### 1. Encode
 
-Encode files or folders into BMP images with optional compression and encryption.
-
-```bash
-cfx encode <file/folder> [options]
-```
-
-**Options:**
-- `-c, --compress <level>`: Compression level (1-21)
-- `-ne, --no-encrypt`: Disable encryption
-- `-gs, --grayscale`: Use 8-bit grayscale mode
-- `-2f, --two-file`: Use two-file system (separate metadata)
-- `-nh, --skip-hash`: Skip hash verification
-- `--sha256`: Enable SHA-256 hashing
-- `--crc32`: Enable CRC32 hashing
-
-**Examples:**
-```bash
-# Basic encoding
-cfx encode document.pdf
-
-# With compression level 12
-cfx encode video.mp4 -c 12
-
-# Encode folder without encryption
-cfx encode /my/folder -ne
-
-# 8-bit grayscale mode with SHA-256
-cfx encode photo.jpg -gs --sha256
-```
-
-### 2. Decode
-
-Extract files from encoded BMP images.
-
-```bash
-cfx decode <image.bmp>
-```
-
-**Example:**
-```bash
-cfx decode document.bmp
-```
-
-### 3. Pack
+### 1. Pack
 
 Create `.cfup` archives from folders.
 
@@ -204,7 +153,7 @@ cfx pack /my/project
 cfx pack /documents backup.cfup
 ```
 
-### 4. Unpack
+### 2. Unpack
 
 Extract `.cfup` archives.
 
@@ -217,7 +166,7 @@ cfx unpack <archive.cfup> [output_dir]
 cfx unpack backup.cfup restored_files
 ```
 
-### 5. Compress
+### 3. Compress
 
 Compress files with advanced algorithms.
 
@@ -240,7 +189,7 @@ cfx compress data.bin 3
 cfx compress archive.tar 21 ultra.cfmp
 ```
 
-### 6. Decompress
+### 4. Decompress
 
 Decompress `.cfmp` files with auto-detection.
 
@@ -253,7 +202,7 @@ cfx decompress <archive.cfmp> [output]
 cfx decompress data.cfmp restored.bin
 ```
 
-### 7. Hash
+### 5. Hash
 
 Calculate file or folder hashes.
 
@@ -279,7 +228,7 @@ cfx hash file.bin --sha256
 cfx hash /project --sha256 -ei
 ```
 
-### 8. Diff
+### 6. Diff
 
 Create binary patches using FastCDC.
 
@@ -292,7 +241,7 @@ cfx diff <source> <destination> <patch_file>
 cfx diff v1.0.bin v2.0.bin update.patch
 ```
 
-### 9. Patch
+### 7. Patch
 
 Apply binary patches.
 
@@ -326,7 +275,7 @@ cfx split secret.key -n 5 -k 3
 cfx split database.db -n 10 -k 7
 ```
 
-### 11. Integrate
+### 8. Integrate
 
 Reconstruct files from shares.
 
@@ -339,7 +288,7 @@ cfx integrate <output> <share1> <share2> ... <shareN>
 cfx integrate recovered.key secret_split_1.cfs secret_split_2.cfs secret_split_3.cfs
 ```
 
-### 12. ZTC (ZIP to CFUP)
+### 9. ZTC (ZIP to CFUP)
 
 Convert ZIP archives to CFUP format.
 
@@ -437,7 +386,6 @@ CFETools/
 │   ├── args/               # Argument definitions
 │   └── *.h                 # Command classes
 ├── func/                   # Core functionality
-│   ├── img_creation/       # BMP encoding/decoding
 │   ├── folder_packer/      # Archive operations
 │   ├── patch_creation/     # Binary patching
 │   └── split_integrate/    # Secret sharing
@@ -459,7 +407,7 @@ CFETools/
 ### Custom Save Path
 
 ```bash
-cfx encode file.txt -sp /custom/output/dir
+cfx compress file.txt -sp /custom/output/dir
 ```
 
 ### Debug Mode
@@ -468,20 +416,10 @@ cfx encode file.txt -sp /custom/output/dir
 cfx -d compress data.bin 15
 ```
 
-### Chaining Operations
-
-```bash
-# Compress → Pack → Encode
-cfx compress data/ 12
-cfx pack data.cfmp
-cfx encode data.cfup -c 15 --sha256
-```
 
 ### Performance Tips
 
 - Use compression levels 1-6 for speed-critical tasks
-- Enable grayscale mode (`-gs`) for smaller image sizes
-- Use `-nh` to skip hash verification for faster encoding
 - Compression levels 16+ use significant memory (LZMA2)
 
 ---

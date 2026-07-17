@@ -4,8 +4,6 @@
 #include <filesystem>
 #include <stdexcept>
 
-extern std::string save_path;
-
 class SplitCommand : public Command {
 public:
     const char* name() const override { return "split"; }
@@ -63,10 +61,10 @@ public:
         
         // Build full output path in save_path
         std::string base_name = std::filesystem::path(file).filename().stem().string();
-        std::filesystem::path output_prefix = std::filesystem::path(save_path) / base_name;
+        std::filesystem::path output_prefix = std::filesystem::path(ctx.config.save_path) / base_name;
         
         Logger::Log(LOG_INFO, "Splitting file into " + std::to_string(n_val) + " shares (need " + std::to_string(k_val) + " to recover)...");
-        Logger::Log(LOG_INFO, "Output location: " + save_path);
+        Logger::Log(LOG_INFO, "Output location: " + ctx.config.save_path);
         
         // 4. Execution
         try {

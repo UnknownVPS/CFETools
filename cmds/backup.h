@@ -7,8 +7,7 @@
 #include <ctime>
 #include <iomanip>
 #include <sstream>
-
-extern std::string save_path;
+#include "command_base.h"
 
 class BackupCommand : public Command {
 public:
@@ -74,7 +73,7 @@ private:
     // Resolve store path: prepend save_path if not absolute and -sp not set
     // Matches behaviour of PackCommand, CompressCommand etc.
     // ------------------------------------------------------------------
-    static std::string resolve_store(const std::string& raw) {
+static std::string resolve_store(const std::string& raw, const std::string& save_path) {
         std::filesystem::path p(raw);
         if (p.is_absolute()) return raw;
         return (std::filesystem::path(save_path) / p).string();
@@ -129,7 +128,7 @@ private:
         }
 
         const std::string& folder = ctx.args[1];
-        std::string store  = resolve_store(ctx.args[2]);
+        std::string store  = resolve_store(ctx.args[2], ctx.config.save_path);
         std::string label  = get_flag(ctx, "label", "l", "initial backup");
         std::string ver_id = resolve_version_id(ctx, "baseline");
 
@@ -147,7 +146,7 @@ private:
         }
 
         const std::string& folder = ctx.args[1];
-        std::string store  = resolve_store(ctx.args[2]);
+        std::string store  = resolve_store(ctx.args[2], ctx.config.save_path);
         std::string label  = get_flag(ctx, "label", "l", "");
         std::string ver_id = resolve_version_id(ctx, "snapshot");
 
@@ -165,14 +164,14 @@ private:
             return 1;
         }
 
-        std::string store   = resolve_store(ctx.args[1]);
+        std::string store   = resolve_store(ctx.args[1], ctx.config.save_path);
         const std::string& version = ctx.args[2];
         const std::string& dest    = ctx.args[3];
 
         std::filesystem::path dest_path =
             std::filesystem::path(dest).is_absolute()
             ? std::filesystem::path(dest)
-            : std::filesystem::path(save_path) / dest;
+            : std::filesystem::path(ctx.config.save_path) / dest;
 
         return backup_restore(store, version, dest_path.string()) ? 0 : 1;
     }
@@ -186,7 +185,7 @@ private:
             return 1;
         }
 
-        std::string store      = resolve_store(ctx.args[1]);
+        std::string store      = resolve_store(ctx.args[1], ctx.config.save_path);
         std::string to_version = get_flag(ctx, "to", "to", "");
 
         if (to_version.empty()) {
@@ -209,7 +208,7 @@ private:
             Logger::Log(LOG_ERROR, "Usage: backup list <store>");
             return 1;
         }
-        return backup_list(resolve_store(ctx.args[1])) ? 0 : 1;
+        return backup_list(resolve_store(ctx.args[1], ctx.config.save_path)) ? 0 : 1;
     }
 
     // ------------------------------------------------------------------
@@ -220,7 +219,7 @@ private:
             Logger::Log(LOG_ERROR, "Usage: backup drop <store> <version>");
             return 1;
         }
-        return backup_drop(resolve_store(ctx.args[1]), ctx.args[2]) ? 0 : 1;
+        return backup_drop(resolve_store(ctx.args[1], ctx.config.save_path), ctx.args[2]) ? 0 : 1;
     }
 
     // ------------------------------------------------------------------
@@ -232,7 +231,7 @@ private:
             return 1;
         }
 
-        std::string store = resolve_store(ctx.args[1]);
+        std::string store = resolve_store(ctx.args[1], ctx.config.save_path);
 
         int keep = 5;
         std::string keep_str = get_flag(ctx, "keep", "k", "");
@@ -267,7 +266,7 @@ private:
             return 1;
         }
 
-        std::string store = resolve_store(ctx.args[1]);
+        std::string store = resolve_store(ctx.args[1], ctx.config.save_path);
 
         BackupManifest manifest;
         if (!read_manifest(store, manifest)) return 1;

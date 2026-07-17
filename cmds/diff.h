@@ -4,8 +4,6 @@
 #include <filesystem>
 #include <fstream>
 
-extern std::string save_path;
-
 class DiffCommand : public Command {
 private:
     // Helper to detect if a signature file is 64-bit or 128-bit
@@ -52,7 +50,7 @@ public:
         if (isSigMode && ctx.args.size() == 2) {
             std::string src = ctx.args[0];
             std::string sig = ctx.args[1];
-            std::filesystem::path sigPath = std::filesystem::path(save_path) / sig;
+            std::filesystem::path sigPath = std::filesystem::path(ctx.config.save_path) / sig;
 
             if (!std::filesystem::exists(src)) {
                 Logger::Log(LOG_ERROR, "Source file missing: " + src);
@@ -75,7 +73,7 @@ public:
             std::string sig   = ctx.args[0];
             std::string dst   = ctx.args[1];
             std::string patch = ctx.args[2];
-            std::filesystem::path patchPath = std::filesystem::path(save_path) / patch;
+            std::filesystem::path patchPath = std::filesystem::path(ctx.config.save_path) / patch;
 
             if (!std::filesystem::exists(sig) || !std::filesystem::exists(dst)) {
                 Logger::Log(LOG_ERROR, "Required files missing for signature patching.");
@@ -104,7 +102,7 @@ public:
             std::string src   = ctx.args[0];
             std::string dst   = ctx.args[1];
             std::string patch = ctx.args[2];
-            std::filesystem::path patchPath = std::filesystem::path(save_path) / patch;
+            std::filesystem::path patchPath = std::filesystem::path(ctx.config.save_path) / patch;
 
             if (!std::filesystem::exists(src) || !std::filesystem::exists(dst)) {
                 Logger::Log(LOG_ERROR, "Source or Destination file missing.");

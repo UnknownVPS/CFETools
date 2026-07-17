@@ -3,8 +3,6 @@
 #include "../utils/compress/decompress.h"
 #include <filesystem>
 
-extern std::string save_path;
-
 class DecompressCommand : public Command {
 public:
     const char* name() const override { 
@@ -35,7 +33,7 @@ public:
                              std::filesystem::path(file).filename().stem().string();
         
         // Build full output path in save_path
-        std::filesystem::path unpackedFilePath = std::filesystem::path(save_path) / output;
+        std::filesystem::path unpackedFilePath = std::filesystem::path(ctx.config.save_path) / output;
         
         Logger::Log(LOG_INFO, "Decompressing file: " + file);
         Logger::Log(LOG_INFO, "Output path: " + unpackedFilePath.string());
