@@ -3,7 +3,7 @@
 #include <string>
 #include "../stream/stream_pipe.h"
 #include "../logger/logger.h"
-
+#include <fstream>
 /**
  * Memory-efficient streaming file decompression function with auto-detection.
  * Handles files of any size by processing in chunks.

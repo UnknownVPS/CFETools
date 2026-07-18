@@ -215,7 +215,7 @@ bool decompressStream(const uint8_t peek_header[8], ReadFn src, WriteFn dst) {
 }
 
 // ─────────────────────────────────────────────────────────────────
-//  File-based wrapper (original public API, unchanged).
+//  File-based wrapper 
 // ─────────────────────────────────────────────────────────────────
 
 bool decompressFile(const std::string& input_file, const std::string& output_file) {
@@ -238,13 +238,14 @@ bool decompressFile(const std::string& input_file, const std::string& output_fil
         return false;
     }
 
-    // For file-based path, src already has full data — pass a zero-byte peek.
-    // We re-read from the beginning so nothing is skipped.
-    uint8_t zero_peek[8] = {};  // no bytes pre-consumed
+    // FIX: Skip the 8 bytes we already peeked so decompressStream can safely 
+    // prepend them back without duplicating the header!
+    fseek(infile, 8, SEEK_SET);
+
     ReadFn src = [infile](void* b, size_t n) -> size_t { return fread(b, 1, n, infile); };
     WriteFn dst = [outfile](const void* b, size_t n) -> bool { return fwrite(b, 1, n, outfile) == n; };
 
-    // Use the header we peeked but let the ReadFn replay from offset 0 (FILE* is still at 0).
+    // Now src reads from byte 8 onwards, and decompressStream will replay `hdr` (bytes 0-7) first.
     bool ok = decompressStream(hdr, src, dst);
     fclose(infile);
     fclose(outfile);

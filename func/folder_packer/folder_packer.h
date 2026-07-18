@@ -1,45 +1,52 @@
 #pragma once
-#include <iostream>
-#include <fstream>
-#include <vector>
-#include <string>
-#include <filesystem>
-#include "../../utils/logger/logger.h"
-#include "../../utils/stream/stream_pipe.h"
 
+#include <cstdint>
+#include <filesystem>
+#include <functional>
+#include <string>
+#include <vector>
+#include "../../utils/logger/logger.h"
 namespace fs = std::filesystem;
 
-// ── Original file-based API (unchanged) ──────────────────────────
-bool pack_folder(const std::string& folderPath, const std::string& packedFilePath);
-bool unpack_packed_file(const std::string& packedFilePath, const std::string& outputFolderPath);
+using WriteFn = std::function<bool(const void*, size_t)>;
+using ReadFn  = std::function<size_t(void*, size_t)>;
 
-// ── Streaming API ─────────────────────────────────────────────────
+struct PackedFileEntry {
+    std::string path;
+    uint64_t    offset;   // byte offset to data, from start of file
+    uint64_t    size;
+    uint64_t    xxh64;    
+};
 
-/**
- * Pack a folder, writing the .cfup byte-stream to `dst` instead of a file.
- * Used for zero-copy pack → compress chaining.
- */
-bool pack_folder_stream(const std::string& folderPath, WriteFn dst);
+// ── Pack ───────────────────────────────────────────────────────
 
-/**
- * Unpack from a ReadFn byte-stream into outputFolderPath.
- * Used for zero-copy decompress → unpack chaining.
- *
- * peek_header: first 8 bytes already read from the stream (may be all zeros
- * if nothing has been consumed yet, in which case they are read via `src`).
- * has_peek: set true only when 8 bytes have genuinely been pre-consumed.
- */
-bool unpack_stream(ReadFn src, const std::string& outputFolderPath);
+bool pack_folder_stream(const std::string& folderPath, WriteFn dst,
+                        bool follow_symlinks = false);
 
-/**
- * Probe the first 4 bytes of a file to check if it looks like a .cfup archive
- * (i.e. a raw little-endian uint32 file-count followed by valid path data).
- * This is a heuristic — not a magic-number check — but sufficient for auto-detect.
- */
-bool looks_like_cfup(const std::string& filePath);
+bool pack_folder(const std::string& folderPath,
+                 const std::string& packedFilePath,
+                 bool follow_symlinks = false);
 
-/**
- * Same probe but from raw bytes already read from a stream.
- * bytes must be at least 4 bytes.
- */
+// ── Unpack ─────────────────────────────────────────────────────
+
+bool unpack_stream(ReadFn src, const std::string& outputFolderPath,
+                   bool verify = true);
+
+bool unpack_packed_file(const std::string& packedFilePath,
+                        const std::string& outputFolderPath,
+                        bool verify = true);
+
+// ── TOC / random access ────────────────────────────────────────
+
+bool list_packed_files(const std::string& packedFilePath,
+                       std::vector<PackedFileEntry>& out_entries);
+
+bool extract_file(const std::string& packedFilePath,
+                  uint32_t file_index,
+                  const std::string& outputPath,
+                  bool verify = true);
+
+// ── Probe ──────────────────────────────────────────────────────
+
 bool looks_like_cfup_header(const uint8_t* bytes, size_t len);
+bool looks_like_cfup(const std::string& filePath);
