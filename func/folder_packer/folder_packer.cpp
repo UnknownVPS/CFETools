@@ -5,6 +5,7 @@
 #include <cstring>
 #include <fstream>
 #include <cstdio>
+#include <set>
 
 namespace fs = std::filesystem;
 
@@ -34,7 +35,7 @@ namespace fs = std::filesystem;
 //    u64   data_size
 //    u64   xxh64
 //
-//  Footer  (24 bytes)
+//  Footer  (20 bytes) 
 //    0  magic[4]       "CFUP"
 //    4  version        u16
 //    6  flags          u16
@@ -46,7 +47,7 @@ static constexpr uint8_t  CFUP_MAGIC[4]   = {'C','F','U','P'};
 static constexpr uint16_t CFUP_VERSION     = 2;
 static constexpr uint16_t CFUP_FLAG_FOLLOW_SYMLINKS = 0x0001;
 static constexpr size_t   CFUP_HEADER_SIZE = 16;
-static constexpr size_t   CFUP_FOOTER_SIZE = 24;
+static constexpr size_t   CFUP_FOOTER_SIZE = 20; // FIX: 4+2+2+4+8 = 20
 static constexpr size_t   BUF_SZ           = 4 * 1024 * 1024;
 
 // ─────────────────────────────────────────────────────────────────

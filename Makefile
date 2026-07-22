@@ -80,7 +80,9 @@ SRCS = utils/userinput/user_input.cpp \
        utils/compress/compress.cpp \
        utils/compress/decompress.cpp \
 	   func/split_integrate/split_integrate.cpp \
-	   func/server/server.cpp \
+	   func/server/server_core.cpp \
+	   func/server/cfup_module.cpp \
+	   func/server/dir_module.cpp \
 	   func/backup/backup.cpp \
        main.cpp
 

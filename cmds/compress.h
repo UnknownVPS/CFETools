@@ -11,7 +11,6 @@ public:
     int minArgs()             const override { return 2; }
 
     int run(CommandContext& ctx) override {
-        const std::string& save_path = ctx.config.save_path;
         std::string file             = ctx.args[0];
         std::string compressionLvl   = ctx.args[1];
 

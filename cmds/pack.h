@@ -15,7 +15,7 @@ class PackCommand : public Command {
 public:
     const char* name()        const override { return "pack"; }
     const char* description() const override { return "Pack folder into .cfup archive (use -c <level> to compress in-flight)"; }
-    const char* usage()       const override { return "pack <folder> [output] [-c <level>]"; }
+    const char* usage()       const override { return "pack <folder> [output] [-c <level>] [-sl, --follow-symlinks]"; }
     int minArgs()             const override { return 1; }
 
     int run(CommandContext& ctx) override {
@@ -30,15 +30,30 @@ public:
         int compress_level = 0;
         if (ctx.flags.count("compress")) compress_level = std::stoi(ctx.flags.at("compress"));
         else if (ctx.flags.count("c"))   compress_level = std::stoi(ctx.flags.at("c"));
-
+        bool follow_symlinks = ctx.boolFlags.count("follow-symlinks") || ctx.boolFlags.count("sl") ? true : false;
+        if (follow_symlinks) {
+            Logger::Log(LOG_INFO, "Symlinks will be packed (followed)");
+        }
         // Resolve output filename
-        std::string default_stem = std::filesystem::path(folder).filename().string();
+        std::string clean_path = folder;
+        while (!clean_path.empty() && (clean_path.back() == '/' || clean_path.back() == '\\')) {
+            clean_path.pop_back();
+        } 
+        std::string default_stem = std::filesystem::canonical(clean_path).filename().string(); // fixed trailing slash bug
         std::string output;
         if (ctx.args.size() >= 2) {
             output = ctx.args[1];
+            // Ensure it has the correct extension if they forgot it
+            if (compress_level > 0) {
+                if (output.size() < 5 || output.compare(output.size() - 5, 5, ".cfmp") != 0)
+                    output += ".cfmp";
+            } else {
+                if (output.size() < 5 || output.compare(output.size() - 5, 5, ".cfup") != 0)
+                    output += ".cfup";
+            }
         } else {
             output = compress_level > 0
-                ? default_stem + ".cfmp"   // packed + compressed (Redundant rn, changing later)
+                ? default_stem + ".cfmp"   // packed + compressed
                 : default_stem + ".cfup";
         }
         std::filesystem::path outPath = std::filesystem::path(ctx.config.save_path) / output;
@@ -48,7 +63,7 @@ public:
             Logger::Log(LOG_INFO, "Packing folder: " + folder);
             Logger::Log(LOG_INFO, "Output: " + outPath.string());
             Logger::StartTimer("Folder packing");
-            bool ok = pack_folder(folder, outPath.string());
+            bool ok = pack_folder(folder, outPath.string(), follow_symlinks);
             Logger::EndTimer("Folder packing", LOG_INFO);
             if (!ok) { Logger::Log(LOG_ERROR, "Packing failed"); return 1; }
         } else {
@@ -138,7 +153,7 @@ public:
                 WriteFn to_pipe = [&pipe](const void* buf, size_t len) -> bool {
                     return pipe->push(buf, len);
                 };
-                bool ok = pack_folder_stream(folder, to_pipe);
+                bool ok = pack_folder_stream(folder, to_pipe, follow_symlinks);
                 pack_ok.store(ok);
                 pipe->close(ok);
             });
