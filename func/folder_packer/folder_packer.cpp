@@ -47,7 +47,7 @@ static constexpr uint8_t  CFUP_MAGIC[4]   = {'C','F','U','P'};
 static constexpr uint16_t CFUP_VERSION     = 2;
 static constexpr uint16_t CFUP_FLAG_FOLLOW_SYMLINKS = 0x0001;
 static constexpr size_t   CFUP_HEADER_SIZE = 16;
-static constexpr size_t   CFUP_FOOTER_SIZE = 20; // FIX: 4+2+2+4+8 = 20
+static constexpr size_t   CFUP_FOOTER_SIZE = 20;
 static constexpr size_t   BUF_SZ           = 4 * 1024 * 1024;
 
 // ─────────────────────────────────────────────────────────────────
@@ -126,35 +126,89 @@ static bool path_is_within(const fs::path& target, const fs::path& root) {
 
 // ─────────────────────────────────────────────────────────────────
 //  File collection
+//
+//  Each entry is { physical_path, logical_path } where:
+//    physical_path — the real path used to open and read the file
+//                    (follows symlinks to find actual bytes)
+//    logical_path  — the path that will be stored in the archive
+//                    (preserves symlink names, relative to pack root)
+//
+//  This separation is the core fix: we no longer call fs::relative()
+//  on the physical path, which would break when a symlink target
+//  lives outside the canonical root.
 // ─────────────────────────────────────────────────────────────────
 
+using FileEntry = std::pair<fs::path, fs::path>; // {physical, logical}
+
+static void collect_files_recursive(
+    const fs::path& physical_dir,
+    const fs::path& logical_dir,
+    std::vector<FileEntry>& out_paths,
+    bool follow_symlinks)
+{
+    std::error_code ec;
+    for (auto it = fs::directory_iterator(physical_dir,
+             fs::directory_options::skip_permission_denied, ec);
+         it != fs::directory_iterator(); it.increment(ec))
+    {
+        if (ec) { ec.clear(); continue; }
+
+        const auto& entry = *it;
+
+        bool is_sym  = entry.is_symlink(ec);  if (ec) { ec.clear(); continue; }
+        bool is_file = entry.is_regular_file(ec); if (ec) { ec.clear(); continue; }
+        bool is_dir  = entry.is_directory(ec);    if (ec) { ec.clear(); continue; }
+
+        if (is_sym && !follow_symlinks) continue;
+
+        // logical name always uses the symlink's own filename,
+        // never the target's — this is what materializes the link
+        // in place rather than following the redirect in the archive.
+        fs::path logical_entry = logical_dir / entry.path().filename();
+
+        if (is_file) {
+            // physical = entry.path() — the OS will resolve the symlink
+            // when we open it for reading, which is exactly what we want.
+            out_paths.push_back({ entry.path(), logical_entry });
+        } else if (is_dir) {
+            fs::path physical_target;
+            if (is_sym) {
+                // Resolve the symlink one level so we recurse into the
+                // real directory, but keep logical_entry as the link name.
+                physical_target = fs::read_symlink(entry.path(), ec);
+                if (ec) { ec.clear(); continue; }
+                // Make absolute if target was a relative symlink
+                if (physical_target.is_relative())
+                    physical_target = entry.path().parent_path() / physical_target;
+            } else {
+                physical_target = entry.path();
+            }
+            collect_files_recursive(physical_target, logical_entry,
+                                    out_paths, follow_symlinks);
+        }
+    }
+}
+
 static bool collect_files(const std::string& folderPath,
-                          std::vector<fs::path>& out_paths,
-                          fs::path& out_canonical,
-                          bool follow_symlinks) {
+                          std::vector<FileEntry>& out_paths,
+                          bool follow_symlinks)
+{
     fs::path folder(folderPath);
     if (!fs::exists(folder) || !fs::is_directory(folder)) {
         Logger::Log(LOG_ERROR, "Input is not a valid folder: " + folderPath);
         return false;
     }
-    out_canonical = fs::canonical(folder);
 
-    auto opts = fs::directory_options::skip_permission_denied;
-    if (follow_symlinks)
-        opts |= fs::directory_options::follow_directory_symlink;
+    fs::path canonical_folder = fs::canonical(folder);
 
-    std::error_code ec;
-    for (auto it = fs::recursive_directory_iterator(out_canonical, opts, ec);
-         it != fs::recursive_directory_iterator(); ++it)
-    {
-        if (ec) { ec.clear(); continue; }
-        const auto& entry = *it;
-        if (!follow_symlinks && entry.is_symlink()) continue;
-        if (entry.is_regular_file())
-            out_paths.push_back(entry.path());
-    }
+    // logical root is empty — all logical paths will be relative to it
+    collect_files_recursive(canonical_folder, fs::path{},
+                            out_paths, follow_symlinks);
 
-    std::sort(out_paths.begin(), out_paths.end());
+    std::sort(out_paths.begin(), out_paths.end(),
+              [](const FileEntry& a, const FileEntry& b){
+                  return a.second < b.second; // sort by logical path
+              });
     return true;
 }
 
@@ -165,12 +219,11 @@ static bool collect_files(const std::string& folderPath,
 bool pack_folder_stream(const std::string& folderPath, WriteFn dst,
                         bool follow_symlinks)
 {
-    std::vector<fs::path> file_paths;
-    fs::path canonical_folder;
-    if (!collect_files(folderPath, file_paths, canonical_folder, follow_symlinks))
+    std::vector<FileEntry> file_entries;
+    if (!collect_files(folderPath, file_entries, follow_symlinks))
         return false;
 
-    const uint32_t file_count = static_cast<uint32_t>(file_paths.size());
+    const uint32_t file_count = static_cast<uint32_t>(file_entries.size());
     const uint16_t flags = follow_symlinks ? CFUP_FLAG_FOLLOW_SYMLINKS : 0;
 
     if (!w_bytes(dst, CFUP_MAGIC, 4) ||
@@ -196,18 +249,23 @@ bool pack_folder_stream(const std::string& folderPath, WriteFn dst,
 
     std::vector<char> buf(BUF_SZ);
 
-    for (const fs::path& fp : file_paths) {
-        fs::path rel = fs::relative(fp, canonical_folder);
-        if (rel.is_absolute()) {
-            Logger::Log(LOG_ERROR, "Cannot compute relative path: " + fp.string());
-            return false;
+    for (const auto& [physical_path, logical_path] : file_entries) {
+        // Use the pre-computed logical path directly — no fs::relative() needed.
+        // This is safe because logical_path was built by concatenating
+        // symlink filenames, never by resolving symlink targets.
+        std::string rel_str = logical_path.generic_string();
+
+        if (!is_safe_relative_path(rel_str)) {
+            Logger::Log(LOG_ERROR, "Unsafe logical path, skipping: " + rel_str);
+            continue;
         }
-        std::string rel_str = rel.generic_string();
+
         uint32_t path_len = static_cast<uint32_t>(rel_str.size());
 
-        std::ifstream in(fp, std::ios::binary | std::ios::ate);
+        // Open via physical path — kernel follows the symlink chain here
+        std::ifstream in(physical_path, std::ios::binary | std::ios::ate);
         if (!in) {
-            Logger::Log(LOG_ERROR, "Cannot open: " + fp.string());
+            Logger::Log(LOG_ERROR, "Cannot open: " + physical_path.string());
             return false;
         }
         uint64_t data_size = static_cast<uint64_t>(in.tellg());
@@ -219,14 +277,13 @@ bool pack_folder_stream(const std::string& folderPath, WriteFn dst,
             !w_bytes(dst, rel_str.data(), path_len) ||
             !w_u64(dst, data_size))
         {
-            Logger::Log(LOG_ERROR, "Write error (entry): " + fp.string());
+            Logger::Log(LOG_ERROR, "Write error (entry): " + rel_str);
             return false;
         }
 
-        // Stack-allocated XXH state (no malloc overhead!)
         XXH64_state_t hash_state;
         if (XXH64_reset(&hash_state, 0) != XXH_OK) {
-            Logger::Log(LOG_ERROR, "XXH64 reset failed: " + fp.string());
+            Logger::Log(LOG_ERROR, "XXH64 reset failed: " + rel_str);
             return false;
         }
 
@@ -235,17 +292,15 @@ bool pack_folder_stream(const std::string& folderPath, WriteFn dst,
             size_t to_read = static_cast<size_t>(std::min<uint64_t>(left, BUF_SZ));
             in.read(buf.data(), static_cast<std::streamsize>(to_read));
             if (static_cast<size_t>(in.gcount()) != to_read) {
-                Logger::Log(LOG_ERROR, "Read error: " + fp.string());
+                Logger::Log(LOG_ERROR, "Read error: " + physical_path.string());
                 return false;
             }
-            
             if (XXH64_update(&hash_state, buf.data(), to_read) != XXH_OK) {
-                Logger::Log(LOG_ERROR, "XXH64 update failed: " + fp.string());
+                Logger::Log(LOG_ERROR, "XXH64 update failed: " + rel_str);
                 return false;
             }
-
             if (!w_bytes(dst, buf.data(), to_read)) {
-                Logger::Log(LOG_ERROR, "Write error (data): " + fp.string());
+                Logger::Log(LOG_ERROR, "Write error (data): " + rel_str);
                 return false;
             }
             left -= to_read;
@@ -254,7 +309,7 @@ bool pack_folder_stream(const std::string& folderPath, WriteFn dst,
         uint64_t hash = XXH64_digest(&hash_state);
 
         if (!w_u64(dst, hash)) {
-            Logger::Log(LOG_ERROR, "Write error (hash): " + fp.string());
+            Logger::Log(LOG_ERROR, "Write error (hash): " + rel_str);
             return false;
         }
 
@@ -474,16 +529,16 @@ bool list_packed_files(const std::string& packedFilePath,
     }
 
     uint8_t b2[2], b4[4], b8[8];
-    
-    if (!read_exact(b2, 2)) return false; 
+
+    if (!read_exact(b2, 2)) return false;
     uint16_t version = r_u16(b2);
-    
+
     if (!read_exact(b2, 2)) return false; // flags
-    
-    if (!read_exact(b4, 4)) return false; 
+
+    if (!read_exact(b4, 4)) return false;
     uint32_t file_count = r_u32(b4);
-    
-    if (!read_exact(b8, 8)) return false; 
+
+    if (!read_exact(b8, 8)) return false;
     uint64_t toc_offset = r_u64(b8);
 
     if (version != CFUP_VERSION) {
@@ -504,13 +559,13 @@ bool list_packed_files(const std::string& packedFilePath,
         std::string path(path_len, '\0');
         if (!read_exact(path.data(), path_len)) return false;
 
-        if (!read_exact(b8, 8)) return false; 
+        if (!read_exact(b8, 8)) return false;
         uint64_t data_offset = r_u64(b8);
-        
-        if (!read_exact(b8, 8)) return false; 
+
+        if (!read_exact(b8, 8)) return false;
         uint64_t data_size = r_u64(b8);
-        
-        if (!read_exact(b8, 8)) return false; 
+
+        if (!read_exact(b8, 8)) return false;
         uint64_t xxh64 = r_u64(b8);
 
         out_entries.push_back({ std::move(path), data_offset, data_size, xxh64 });
