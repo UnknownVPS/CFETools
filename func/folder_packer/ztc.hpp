@@ -8,8 +8,13 @@
 #include <cstdint>
 #include <algorithm>
 #include <memory>
+#include <cstring>
 #include <zip.h>
 #include "../../utils/logger/logger.h"
+
+// XXH64 required for v2 hashing
+#define XXH_INLINE_ALL
+#include "../../utils/hashers/xxhash.h"
 
 namespace fs = std::filesystem;
 
@@ -63,28 +68,57 @@ public:
     }
 
     ZipFile(const ZipFile&) = delete;
-    ZipFile& operator=(const ZipFile&) = delete;
 
     zip_int64_t read(void* buffer, zip_uint64_t size) {
         return zip_fread(file_, buffer, size);
     }
 };
 
-// Converts ZIP archive to CFUP format with streaming
+// ─────────────────────────────────────────────────────────────────
+//  Little-Endian helpers (Local to avoid coupling dependencies)
+// ─────────────────────────────────────────────────────────────────
+
+static bool w_u16(std::ofstream& f, uint16_t v) {
+    uint8_t b[2] = { (uint8_t)v, (uint8_t)(v >> 8) };
+    f.write(reinterpret_cast<const char*>(b), 2); return f.good();
+}
+static bool w_u32(std::ofstream& f, uint32_t v) {
+    uint8_t b[4] = { (uint8_t)v, (uint8_t)(v >> 8), (uint8_t)(v >> 16), (uint8_t)(v >> 24) };
+    f.write(reinterpret_cast<const char*>(b), 4); return f.good();
+}
+static bool w_u64(std::ofstream& f, uint64_t v) {
+    uint8_t b[8];
+    for (int i = 0; i < 8; ++i) b[i] = (uint8_t)(v >> (i * 8));
+    f.write(reinterpret_cast<const char*>(b), 8); return f.good();
+}
+
+static uint16_t r_u16(const uint8_t* p) {
+    return (uint16_t)p[0] | ((uint16_t)p[1] << 8);
+}
+static uint32_t r_u32(const uint8_t* p) {
+    return (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
+}
+static uint64_t r_u64(const uint8_t* p) {
+    uint64_t v = 0;
+    for (int i = 0; i < 8; ++i) v |= (uint64_t)p[i] << (i * 8);
+    return v;
+}
+
+// ─────────────────────────────────────────────────────────────────
+//  ZIP -> CFUP v2
+// ─────────────────────────────────────────────────────────────────
+
 bool convert_zip_to_cfup(const std::string& zipFilePath, const std::string& cfupFilePath) {
     try {
-        // Open ZIP archive using libzip
         ZipArchive zip_archive(zipFilePath);
         zip_t* zip = zip_archive.get();
 
-        // Get number of entries
         zip_int64_t num_entries = zip_get_num_entries(zip, 0);
         if (num_entries < 0) {
             Logger::Log(LOG_ERROR, "Failed to get ZIP entry count");
             return false;
         }
 
-        // Collect file entries (skip directories)
         struct FileEntry {
             std::string name;
             zip_uint64_t index;
@@ -96,59 +130,71 @@ bool convert_zip_to_cfup(const std::string& zipFilePath, const std::string& cfup
 
         for (zip_int64_t i = 0; i < num_entries; ++i) {
             zip_stat_t stat;
-            if (zip_stat_index(zip, i, 0, &stat) != 0) {
-                Logger::Log(LOG_ERROR, "Failed to stat entry at index " + std::to_string(i));
-                continue;
-            }
+            if (zip_stat_index(zip, i, 0, &stat) != 0) continue;
 
             std::string name = stat.name;
-            
-            // Skip directories (names ending with '/')
-            if (name.empty() || name.back() == '/') {
-                continue;
-            }
+            if (name.empty() || name.back() == '/') continue;
 
-            // Normalize path separators
             std::replace(name.begin(), name.end(), '\\', '/');
+
+            // V2 Security: Block directory traversal from ZIPs
+            if (name[0] == '/' || name.find("..") != std::string::npos) {
+                Logger::Log(LOG_ERROR, "Unsafe path blocked in ZIP: " + name);
+                return false;
+            }
 
             files.push_back({name, static_cast<zip_uint64_t>(i), stat.size});
         }
 
-        // Sort files alphabetically for consistent output
         std::sort(files.begin(), files.end(), [](const FileEntry& a, const FileEntry& b) {
             return a.name < b.name;
         });
 
         uint32_t file_count = static_cast<uint32_t>(files.size());
 
-        // Open output CFUP file
         std::ofstream out(cfupFilePath, std::ios::binary);
         if (!out) {
             Logger::Log(LOG_ERROR, "Failed to create CFUP file: " + cfupFilePath);
             return false;
         }
 
-        // Write file count header
-        out.write(reinterpret_cast<const char*>(&file_count), sizeof(file_count));
+        // ── Write CFUP v2 Header (16 bytes) ──
+        out.write("CFUP", 4);
+        w_u16(out, 2); // version
+        w_u16(out, 0); // flags
+        w_u32(out, file_count);
+        w_u32(out, 0); // reserved
 
-        // Streaming buffer
+        uint64_t cur = 16; // CFUP_HEADER_SIZE
+
+        struct TOCEntry {
+            std::string path;
+            uint64_t data_offset;
+            uint64_t data_size;
+            uint64_t xxh64;
+        };
+        std::vector<TOCEntry> toc;
+        toc.reserve(file_count);
+
         std::vector<uint8_t> buffer(CHUNK_SIZE);
 
-        // Process each file with streaming
+        // ── Stream Files ──
         for (const auto& file : files) {
             uint32_t path_len = static_cast<uint32_t>(file.name.size());
             uint64_t data_size = file.size;
+            
+            // Calculate exact byte offset where data starts
+            uint64_t data_offset = cur + 4 + path_len + 8;
 
-            // Write path length and path
-            out.write(reinterpret_cast<const char*>(&path_len), sizeof(path_len));
+            // Write Entry Header
+            w_u32(out, path_len);
             out.write(file.name.data(), path_len);
+            w_u64(out, data_size);
 
-            // Write data size
-            out.write(reinterpret_cast<const char*>(&data_size), sizeof(data_size));
-
-            // Stream file data using libzip
-            // libzip automatically handles decompression
+            // Stream data and calculate hash simultaneously
             ZipFile zip_file(zip, file.index);
+            XXH64_state_t hash_state;
+            XXH64_reset(&hash_state, 0);
             
             uint64_t remaining = data_size;
             while (remaining > 0) {
@@ -156,14 +202,12 @@ bool convert_zip_to_cfup(const std::string& zipFilePath, const std::string& cfup
                 zip_int64_t bytes_read = zip_file.read(buffer.data(), to_read);
                 
                 if (bytes_read < 0) {
-                    Logger::Log(LOG_ERROR, "Failed to read from ZIP file: " + file.name);
+                    Logger::Log(LOG_ERROR, "Failed to read from ZIP: " + file.name);
                     return false;
                 }
-                
-                if (bytes_read == 0) {
-                    break; // EOF
-                }
+                if (bytes_read == 0) break;
 
+                XXH64_update(&hash_state, buffer.data(), bytes_read);
                 out.write(reinterpret_cast<const char*>(buffer.data()), bytes_read);
                 remaining -= bytes_read;
             }
@@ -172,10 +216,34 @@ bool convert_zip_to_cfup(const std::string& zipFilePath, const std::string& cfup
                 Logger::Log(LOG_ERROR, "Incomplete read for file: " + file.name);
                 return false;
             }
+
+            // Write V2 Hash
+            uint64_t hash = XXH64_digest(&hash_state);
+            w_u64(out, hash);
+
+            cur = data_offset + data_size + 8;
+            toc.push_back({file.name, data_offset, data_size, hash});
         }
 
+        // ── Write TOC ──
+        uint64_t toc_offset = cur;
+        for (const auto& e : toc) {
+            w_u32(out, static_cast<uint32_t>(e.path.size()));
+            out.write(e.path.data(), e.path.size());
+            w_u64(out, e.data_offset);
+            w_u64(out, e.data_size);
+            w_u64(out, e.xxh64);
+        }
+
+        // ── Write Footer (20 bytes) ──
+        out.write("CFUP", 4);
+        w_u16(out, 2); // version
+        w_u16(out, 0); // flags
+        w_u32(out, file_count);
+        w_u64(out, toc_offset);
+
         out.close();
-        Logger::Log(LOG_INFO, "Converted ZIP to CFUP: " + std::to_string(file_count) + " files");
+        Logger::Log(LOG_INFO, "Converted ZIP to CFUP v2: " + std::to_string(file_count) + " files");
         return true;
 
     } catch (const std::exception& e) {
@@ -184,18 +252,20 @@ bool convert_zip_to_cfup(const std::string& zipFilePath, const std::string& cfup
     }
 }
 
+// ─────────────────────────────────────────────────────────────────
+//  CFUP v2 -> ZIP
+// ─────────────────────────────────────────────────────────────────
+
 // Custom source callback for streaming from CFUP to ZIP
 struct CFUPSourceData {
     std::ifstream* input;
     uint64_t file_size;
     uint64_t bytes_read;
-    std::vector<uint8_t> buffer;
 
     CFUPSourceData(std::ifstream* in, uint64_t size) 
-        : input(in), file_size(size), bytes_read(0), buffer(CHUNK_SIZE) {}
+        : input(in), file_size(size), bytes_read(0) {}
 };
 
-// Callback function for zip_source_function
 static zip_int64_t cfup_source_callback(void* userdata, void* data, zip_uint64_t len, zip_source_cmd_t cmd) {
     CFUPSourceData* src = static_cast<CFUPSourceData*>(userdata);
 
@@ -205,16 +275,12 @@ static zip_int64_t cfup_source_callback(void* userdata, void* data, zip_uint64_t
             return 0;
 
         case ZIP_SOURCE_READ: {
-            if (src->bytes_read >= src->file_size) {
-                return 0; // EOF
-            }
-
+            if (src->bytes_read >= src->file_size) return 0;
             uint64_t remaining = src->file_size - src->bytes_read;
             size_t to_read = std::min<uint64_t>(len, remaining);
             
             src->input->read(reinterpret_cast<char*>(data), to_read);
             size_t actually_read = src->input->gcount();
-            
             src->bytes_read += actually_read;
             return actually_read;
         }
@@ -233,8 +299,7 @@ static zip_int64_t cfup_source_callback(void* userdata, void* data, zip_uint64_t
         case ZIP_SOURCE_ERROR: {
             zip_error_t zip_error;
             zip_error_init_with_code(&zip_error, ZIP_ER_INTERNAL);
-            zip_int64_t ret = zip_error_to_data(&zip_error, data, len);
-            return ret;
+            return zip_error_to_data(&zip_error, data, len);
         }
 
         case ZIP_SOURCE_FREE:
@@ -246,7 +311,6 @@ static zip_int64_t cfup_source_callback(void* userdata, void* data, zip_uint64_t
     }
 }
 
-// Converts CFUP back to ZIP format with streaming compression
 bool convert_cfup_to_zip(const std::string& cfupFilePath, const std::string& zipFilePath) {
     std::ifstream in(cfupFilePath, std::ios::binary);
     if (!in) {
@@ -254,16 +318,32 @@ bool convert_cfup_to_zip(const std::string& cfupFilePath, const std::string& zip
         return false;
     }
 
-    // Read file count
-    uint32_t file_count;
-    in.read(reinterpret_cast<char*>(&file_count), sizeof(file_count));
-    if (in.fail()) {
-        Logger::Log(LOG_ERROR, "Failed to read file count from CFUP");
+    auto read_exact = [&](void* buf, size_t n) -> bool {
+        in.read(static_cast<char*>(buf), n);
+        return in.gcount() == static_cast<std::streamsize>(n);
+    };
+
+    // ── Read CFUP v2 Header (16 bytes) ──
+    uint8_t magic[4];
+    if (!read_exact(magic, 4) || memcmp(magic, "CFUP", 4) != 0) {
+        Logger::Log(LOG_ERROR, "Not a valid CFUP v2 file");
         return false;
     }
 
+    uint8_t b2[2], b4[4];
+    if (!read_exact(b2, 2)) return false;
+    uint16_t version = r_u16(b2);
+    if (version != 2) {
+        Logger::Log(LOG_ERROR, "Unsupported CFUP version: " + std::to_string(version));
+        return false;
+    }
+    
+    if (!read_exact(b2, 2)) return false; // flags
+    if (!read_exact(b4, 4)) return false; // reserved
+    
+    uint32_t file_count = r_u32(b4);
+
     try {
-        // Create new ZIP archive
         int error = 0;
         zip_t* zip = zip_open(zipFilePath.c_str(), ZIP_CREATE | ZIP_TRUNCATE, &error);
         if (!zip) {
@@ -273,24 +353,19 @@ bool convert_cfup_to_zip(const std::string& cfupFilePath, const std::string& zip
             return false;
         }
 
-    // Per-file compression is set below with zip_set_file_compression.
-    // (Removed invalid call to zip_set_default_compression which is not part of libzip's public API.)
+        uint8_t b8[8];
 
-        // Process each file
         for (uint32_t i = 0; i < file_count; ++i) {
-            // Read path length and path
-            uint32_t path_len;
-            in.read(reinterpret_cast<char*>(&path_len), sizeof(path_len));
-            
+            if (!read_exact(b4, 4)) return false;
+            uint32_t path_len = r_u32(b4);
+
             std::string relative_path(path_len, '\0');
-            in.read(&relative_path[0], path_len);
+            if (!read_exact(relative_path.data(), path_len)) return false;
 
-            // Read data size
-            uint64_t data_size;
-            in.read(reinterpret_cast<char*>(&data_size), sizeof(data_size));
+            if (!read_exact(b8, 8)) return false;
+            uint64_t data_size = r_u64(b8);
 
-            // Create streaming source for this file
-            // Note: CFUPSourceData will be deleted by ZIP_SOURCE_FREE callback
+            // Stream file data to ZIP using callback
             CFUPSourceData* src_data = new CFUPSourceData(&in, data_size);
             
             zip_source_t* source = zip_source_function(zip, cfup_source_callback, src_data);
@@ -301,7 +376,6 @@ bool convert_cfup_to_zip(const std::string& cfupFilePath, const std::string& zip
                 return false;
             }
 
-            // Add file to ZIP with streaming source
             zip_int64_t idx = zip_file_add(zip, relative_path.c_str(), source, ZIP_FL_OVERWRITE | ZIP_FL_ENC_UTF_8);
             if (idx < 0) {
                 Logger::Log(LOG_ERROR, "Failed to add file to ZIP: " + relative_path);
@@ -310,18 +384,20 @@ bool convert_cfup_to_zip(const std::string& cfupFilePath, const std::string& zip
                 return false;
             }
 
-            // Set compression method (DEFLATE with level 6)
             zip_set_file_compression(zip, idx, ZIP_CM_DEFLATE, 6);
+
+            // CRITICAL: Skip the 8-byte XXH64 hash that follows the data in v2!
+            if (!read_exact(b8, 8)) return false;
         }
 
-        // Finalize and close ZIP
+        // We are now at the TOC. We don't need it for ZIP conversion, so just close.
         if (zip_close(zip) != 0) {
             Logger::Log(LOG_ERROR, "Failed to finalize ZIP file");
             return false;
         }
 
         in.close();
-        Logger::Log(LOG_INFO, "Converted CFUP to ZIP: " + std::to_string(file_count) + " files");
+        Logger::Log(LOG_INFO, "Converted CFUP v2 to ZIP: " + std::to_string(file_count) + " files");
         return true;
 
     } catch (const std::exception& e) {
