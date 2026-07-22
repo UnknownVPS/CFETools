@@ -14,3 +14,4 @@
 #include "split.h"
 #include "integrate.h"
 #include "server.h"
+#include "migrate.h"

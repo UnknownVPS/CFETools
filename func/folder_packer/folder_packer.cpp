@@ -722,3 +722,202 @@ bool unpack_packed_file(const std::string& packedFilePath,
     fclose(f);
     return ok;
 }
+
+// ═════════════════════════════════════════════════════════════════
+//  migrate_cfup_v1_to_v2_stream
+//  Converts a legacy v1 archive to v2 on-the-fly.
+//  Adds XXH64 hashing, TOC, Footer, and path safety validation.
+// ═════════════════════════════════════════════════════════════════
+
+bool migrate_cfup_v1_to_v2_stream(ReadFn src, WriteFn dst)
+{
+    auto read_exact = [&](void* buf, size_t n) -> bool {
+        size_t got = 0;
+        uint8_t* p = static_cast<uint8_t*>(buf);
+        while (got < n) {
+            size_t r = src(p + got, n - got);
+            if (r == 0) return false;
+            got += r;
+        }
+        return true;
+    };
+    auto read_u32 = [&](uint32_t& v) -> bool {
+        uint8_t b[4]; if (!read_exact(b, 4)) return false; v = r_u32(b); return true;
+    };
+    auto read_u64 = [&](uint64_t& v) -> bool {
+        uint8_t b[8]; if (!read_exact(b, 8)) return false; v = r_u64(b); return true;
+    };
+
+    // ── 1. Read V1 Header ──
+    uint32_t file_count;
+    if (!read_u32(file_count)) {
+        Logger::Log(LOG_ERROR, "Cannot read v1 file count");
+        return false;
+    }
+
+    // ── 2. Write V2 Header ──
+    // Note: v1 had no symlink tracking, so flags = 0
+    if (!w_bytes(dst, CFUP_MAGIC, 4) ||
+        !w_u16(dst, CFUP_VERSION)   ||
+        !w_u16(dst, 0)              || 
+        !w_u32(dst, file_count)     ||
+        !w_u32(dst, 0))
+    {
+        Logger::Log(LOG_ERROR, "Write error (v2 header)");
+        return false;
+    }
+
+    uint64_t cur = CFUP_HEADER_SIZE;
+
+    struct TOCEntry {
+        std::string path;
+        uint64_t data_offset;
+        uint64_t data_size;
+        uint64_t xxh64;
+    };
+    std::vector<TOCEntry> toc;
+    toc.reserve(file_count);
+
+    std::vector<char> buf(BUF_SZ);
+
+    // ── 3. Stream V1 entries into V2 format ──
+    for (uint32_t i = 0; i < file_count; ++i) {
+        uint32_t path_len;
+        if (!read_u32(path_len) || path_len > 65535) {
+            Logger::Log(LOG_ERROR, "Cannot read v1 path length (entry " + std::to_string(i) + ")");
+            return false;
+        }
+
+        std::string path(path_len, '\0');
+        if (!read_exact(path.data(), path_len)) {
+            Logger::Log(LOG_ERROR, "Cannot read v1 path string (entry " + std::to_string(i) + ")");
+            return false;
+        }
+
+        // SECURE MIGRATION: Sanitize v1 paths using v2 rules.
+        // If a v1 archive contained "../../etc/passwd", we abort 
+        // instead of carrying the vulnerability into the v2 archive.
+        if (!is_safe_relative_path(path)) {
+            Logger::Log(LOG_ERROR, "Unsafe path detected in v1 archive, aborting migration: " + path);
+            return false;
+        }
+
+        uint64_t data_size;
+        if (!read_u64(data_size)) {
+            Logger::Log(LOG_ERROR, "Cannot read v1 data size (entry " + std::to_string(i) + ")");
+            return false;
+        }
+
+        uint64_t data_offset = cur + 4 + path_len + 8;
+
+        // Write V2 entry header
+        if (!w_u32(dst, path_len) ||
+            !w_bytes(dst, path.data(), path_len) ||
+            !w_u64(dst, data_size))
+        {
+            Logger::Log(LOG_ERROR, "Write error (v2 entry header)");
+            return false;
+        }
+
+        // Stream data, calculate missing XXH64 hash, and write
+        XXH64_state_t hash_state;
+        if (XXH64_reset(&hash_state, 0) != XXH_OK) return false;
+
+        uint64_t left = data_size;
+        while (left > 0) {
+            size_t to_read = static_cast<size_t>(std::min<uint64_t>(left, BUF_SZ));
+            
+            if (!read_exact(buf.data(), to_read)) {
+                Logger::Log(LOG_ERROR, "Short read in v1 data (entry " + std::to_string(i) + ")");
+                return false;
+            }
+            
+            if (XXH64_update(&hash_state, buf.data(), to_read) != XXH_OK) return false;
+
+            if (!w_bytes(dst, buf.data(), to_read)) {
+                Logger::Log(LOG_ERROR, "Write error (v2 data)");
+                return false;
+            }
+            left -= to_read;
+        }
+
+        uint64_t hash = XXH64_digest(&hash_state);
+
+        // Write V2 hash (v1 didn't have this)
+        if (!w_u64(dst, hash)) return false;
+
+        cur = data_offset + data_size + 8;
+        toc.push_back({ path, data_offset, data_size, hash });
+    }
+
+    // ── 4. Write V2 TOC ──
+    uint64_t toc_offset = cur;
+    for (const auto& e : toc) {
+        uint32_t plen = static_cast<uint32_t>(e.path.size());
+        if (!w_u32(dst, plen) ||
+            !w_bytes(dst, e.path.data(), plen) ||
+            !w_u64(dst, e.data_offset) ||
+            !w_u64(dst, e.data_size) ||
+            !w_u64(dst, e.xxh64))
+        {
+            Logger::Log(LOG_ERROR, "Write error (v2 TOC)");
+            return false;
+        }
+    }
+
+    // ── 5. Write V2 Footer ──
+    if (!w_bytes(dst, CFUP_MAGIC, 4) ||
+        !w_u16(dst, CFUP_VERSION) ||
+        !w_u16(dst, 0)            ||
+        !w_u32(dst, file_count)   ||
+        !w_u64(dst, toc_offset))
+    {
+        Logger::Log(LOG_ERROR, "Write error (v2 footer)");
+        return false;
+    }
+
+    Logger::Log(LOG_INFO, "Migrated v1 -> v2 successfully (" + std::to_string(file_count) + " files)");
+    return true;
+}
+
+// ═════════════════════════════════════════════════════════════════
+//  File-based wrapper for migration
+// ═════════════════════════════════════════════════════════════════
+
+bool migrate_cfup_v1_to_v2(const std::string& v1_path, const std::string& v2_path) {
+    FILE* in = fopen(v1_path.c_str(), "rb");
+    if (!in) {
+        Logger::Log(LOG_ERROR, "Cannot open v1 archive: " + v1_path);
+        return false;
+    }
+
+    FILE* out = fopen(v2_path.c_str(), "wb");
+    if (!out) {
+        Logger::Log(LOG_ERROR, "Cannot create v2 archive: " + v2_path);
+        fclose(in);
+        return false;
+    }
+
+    // 16MB write buffer for max speed (since we discussed NVMe speeds)
+    std::vector<char> write_buf(16 * 1024 * 1024);
+    setvbuf(out, write_buf.data(), _IOFBF, write_buf.size());
+
+    ReadFn src = [in](void* buf, size_t len) -> size_t {
+        return fread(buf, 1, len, in);
+    };
+
+    WriteFn dst = [out](const void* buf, size_t len) -> bool {
+        return fwrite(buf, 1, len, out) == len;
+    };
+
+    bool ok = migrate_cfup_v1_to_v2_stream(src, dst);
+
+    fclose(in);
+    fclose(out);
+
+    if (!ok) {
+        fs::remove(v2_path); // Cleanup partial file on failure
+    }
+
+    return ok;
+}

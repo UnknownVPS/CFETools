@@ -1,4 +1,4 @@
 #ifndef VERSION_H
 #define VERSION_H
-#define VERSION "0.7.0-alpha-19"
+#define VERSION "0.7.0-alpha-20"
 #endif

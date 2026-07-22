@@ -50,3 +50,6 @@ bool extract_file(const std::string& packedFilePath,
 
 bool looks_like_cfup_header(const uint8_t* bytes, size_t len);
 bool looks_like_cfup(const std::string& filePath);
+
+// Migrator
+bool migrate_cfup_v1_to_v2(const std::string& v1_path, const std::string& v2_path);
